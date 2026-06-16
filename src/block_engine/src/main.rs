@@ -2,7 +2,10 @@ use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use std::time::Duration;
+
 use clap::Parser;
+use jito_auction::Auction;
 use jito_auth::interceptor::AuthInterceptor;
 use jito_auth::server::{random_secret, spawn_challenge_pruner, AuthServiceImpl};
 use jito_auth::token::AuthState;
@@ -58,6 +61,23 @@ struct Args {
     /// upcoming leader (so traffic arrives before its slot begins).
     #[clap(long, env, default_value_t = 2)]
     leader_lookahead_slots: u64,
+
+    /// Comma-separated base58 tip accounts. Bundles are scored by lamports
+    /// transferred to these accounts. If empty, every bundle scores 0 tip.
+    #[clap(long, env = "TIP_ACCOUNTS", value_delimiter = ',')]
+    tip_accounts: Vec<String>,
+
+    /// How often (ms) to run the auction and emit winners to the validator.
+    #[clap(long, env, default_value_t = 200)]
+    auction_interval_ms: u64,
+
+    /// Per-block compute-unit budget the winning bundle set must fit within.
+    #[clap(long, env, default_value_t = 48_000_000)]
+    block_cu_limit: u64,
+
+    /// Bundles older than this (ms) are dropped before each auction.
+    #[clap(long, env, default_value_t = 200)]
+    bundle_ttl_ms: u64,
 }
 
 fn main() {
@@ -103,11 +123,38 @@ fn main() {
             }
         };
 
+        // The auction buffers bundles from searchers and, on each tick, emits the
+        // winning set to the validator via `bundle_sender`.
+        let auction = Arc::new(Auction::from_config(
+            &args.tip_accounts,
+            args.block_cu_limit,
+            Duration::from_millis(args.bundle_ttl_ms),
+        ));
+
+        // Auction tick: run the auction on an interval, forward winners.
+        {
+            let auction = auction.clone();
+            let interval_ms = args.auction_interval_ms;
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_millis(interval_ms));
+                loop {
+                    interval.tick().await;
+                    for winner in auction.run_auction() {
+                        if bundle_sender.send(winner).await.is_err() {
+                            warn!("validator bundle channel closed; stopping auction tick");
+                            return;
+                        }
+                    }
+                }
+            });
+        }
+
         // start searcher server (token-protected)
         {
             let interceptor = AuthInterceptor::new(auth_state.clone());
+            let auction = auction.clone();
             tokio::spawn(async move {
-                let searcher_service_impl = SearcherServiceImpl::new(bundle_sender);
+                let searcher_service_impl = SearcherServiceImpl::new(auction);
                 let searcher_svc =
                     SearcherServiceServer::with_interceptor(searcher_service_impl, interceptor);
                 info!("starting searcher server at {}", args.searcher_addr);

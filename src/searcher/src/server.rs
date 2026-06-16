@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use jito_auction::Auction;
 use jito_protos::bundle::{BundleResult, BundleUuid};
 use jito_protos::searcher::{
     searcher_service_server::SearcherService, ConnectedLeadersRegionedRequest,
@@ -7,21 +10,19 @@ use jito_protos::searcher::{
     SubscribeBundleResultsRequest,
 };
 use log::info;
-use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
 pub struct SearcherServiceImpl {
-    bundle_sender: Sender<BundleUuid>,
+    auction: Arc<Auction>,
 }
 
 impl SearcherServiceImpl {
     pub const MAX_BUNDLE_LEN: usize = 5;
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(bundle_sender: Sender<BundleUuid>) -> Self {
-        SearcherServiceImpl { bundle_sender }
+    pub fn new(auction: Arc<Auction>) -> Self {
+        SearcherServiceImpl { auction }
     }
 }
 
@@ -51,11 +52,10 @@ impl SearcherService for SearcherServiceImpl {
 
         info!("received bundle_uuid: {:?}", bundle_uuid.uuid);
 
+        // Hand the bundle to the auction; it will be scored and compete for
+        // inclusion on the next auction tick (rather than forwarded immediately).
         if bundle_uuid.bundle.is_some() {
-            self.bundle_sender
-                .send(bundle_uuid)
-                .await
-                .map_err(|_| Status::internal("error forwarding bundle"))?;
+            self.auction.submit(bundle_uuid);
         }
 
         Ok(Response::new(SendBundleResponse { uuid }))

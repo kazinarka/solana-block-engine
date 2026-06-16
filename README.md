@@ -33,7 +33,8 @@ Two channels stitch the services together (see `src/block_engine/src/main.rs`):
 | `relayer` | `BlockEngineRelayer` service — ingests packets from the relayer | ✅ **new** (reference never built this) |
 | `validator` | `BlockEngineValidator` service — routes packets+bundles to the leading validator | ✅ leader-aware |
 | `leader_tracker` | polls RPC for the leader schedule; answers "is X leading soon?" | ✅ new |
-| `searcher` | `SearcherService` — accepts bundles | ⚠️ `send_bundle` works; rest `unimplemented!()` |
+| `searcher` | `SearcherService` — accepts bundles into the auction | ⚠️ `send_bundle` works; rest `unimplemented!()` |
+| `auction` | scores bundles by tip, packs winners under a CU budget | ✅ tip extraction real; CU estimated (sim = 4b) |
 | `auth` | `AuthService` — ed25519 challenge/response + HS256 JWT, interceptor, pubkey allowlist | ✅ real, tested |
 | `block_engine` | binary wiring all services together | ✅ builds |
 | `searcher_client` | test "bundle blaster" (authenticates, then streams bundles) | ✅ ported to Agave 2.x; not in default build |
@@ -55,11 +56,11 @@ This is a wiring skeleton. The MEV "brain" is intentionally absent:
 1. ~~**Real auth**~~ ✅ done — ed25519 challenge/response + HS256 JWT in
    `src/auth/`, enforced via an interceptor on the validator/relayer/searcher
    services, with a configurable pubkey allowlist (`--allowed-pubkeys`).
-2. **The auction** — bundles are forwarded 1:1 immediately. A real engine
-   buffers bundles, simulates them against bank state, and selects the
-   highest-tip combination that fits the block CU limit.
-3. **Bundle simulation** — replay bundles against a Solana bank (SVM) to verify
-   success and compute actual tip value.
+2. ~~**The auction**~~ ✅ done (step 4a) — bundles are buffered, scored by tip
+   (lamports to `--tip-accounts`), and the highest tip-per-CU set that fits
+   `--block-cu-limit` is emitted each `--auction-interval-ms` tick.
+3. **Bundle simulation** (step 4b, next) — replay bundles against a Solana bank
+   (SVM) to verify success and replace the estimated CU with real consumption.
 4. ~~**Leader-aware routing**~~ ✅ done — `leader_tracker` polls RPC for the
    schedule; the validator service tags each subscription with the validator's
    authenticated identity and forwards only to upcoming leaders. Enable with

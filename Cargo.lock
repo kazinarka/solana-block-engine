@@ -2114,6 +2114,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "jito-auction"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "jito-protos",
+ "log",
+ "solana-sdk",
+]
+
+[[package]]
 name = "jito-auth"
 version = "0.1.0"
 dependencies = [
@@ -2136,6 +2146,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "env_logger 0.11.10",
+ "jito-auction",
  "jito-auth",
  "jito-leader-tracker",
  "jito-protos",
@@ -2182,6 +2193,7 @@ dependencies = [
 name = "jito-searcher"
 version = "0.1.0"
 dependencies = [
+ "jito-auction",
  "jito-protos",
  "log",
  "prost-types",

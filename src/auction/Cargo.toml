@@ -1,0 +1,15 @@
+[package]
+name = "jito-auction"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "jito_auction"
+path = "src/lib.rs"
+
+[dependencies]
+jito-protos = { path = "../jito_protos" }
+bincode = "1.3"
+log = { workspace = true }
+solana-sdk = "2"

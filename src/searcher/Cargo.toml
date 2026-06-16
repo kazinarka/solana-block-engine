@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 jito-protos = { path = "../jito_protos" }
+jito-auction = { path = "../auction" }
 log = { workspace = true }
 prost-types = { workspace = true }
 tokio = { workspace = true }

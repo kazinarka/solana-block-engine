@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
+jito-auction = { path = "../auction" }
 jito-auth = { path = "../auth" }
 jito-leader-tracker = { path = "../leader_tracker" }
 jito-protos = { path = "../jito_protos" }
