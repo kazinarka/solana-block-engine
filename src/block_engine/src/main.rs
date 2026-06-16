@@ -89,6 +89,12 @@ struct Args {
     #[clap(long, env = "SIM_RPC_URL")]
     sim_rpc_url: Option<String>,
 
+    /// Use jito-solana's atomic `simulateBundle` RPC instead of per-transaction
+    /// `simulateTransaction`. Requires a jito-solana RPC; more accurate for
+    /// bundles whose later transactions depend on earlier ones.
+    #[clap(long, env = "SIM_ATOMIC")]
+    sim_atomic: bool,
+
     /// Forward ALL packets from the relayer (advertise "*") instead of only the
     /// accounts/programs of interest derived from submitted bundles.
     #[clap(long, env = "FORWARD_ALL_PACKETS")]
@@ -255,8 +261,9 @@ fn main() {
         // the coarse CU estimate and never drop for failure.
         let simulator = match args.sim_rpc_url {
             Some(url) => {
-                info!("bundle simulation enabled via RPC {url}");
-                Some(Arc::new(RpcSimulator::new(url)))
+                let mode = if args.sim_atomic { "atomic simulateBundle" } else { "per-tx" };
+                info!("bundle simulation enabled via RPC {url} ({mode})");
+                Some(Arc::new(RpcSimulator::new(url, args.sim_atomic)))
             }
             None => {
                 warn!("SIM_RPC_URL not set; using estimated CU (no bundle simulation)");

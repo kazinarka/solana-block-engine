@@ -37,7 +37,7 @@ Two channels stitch the services together (see `src/block_engine/src/main.rs`):
 | `searcher` | `SearcherService` — accepts bundles; streams bundle results | ✅ `send_bundle` + `SubscribeBundleResults`; some RPCs `unimplemented!()` |
 | `results` | routes per-bundle outcomes back to the submitting searcher | ✅ new |
 | `auction` | scores bundles by tip, packs winners under a CU budget | ✅ tip + real-CU/validity from simulation |
-| `simulator` | RPC-backed bundle simulation (real CU, drop failing bundles) | ✅ via `--sim-rpc-url` |
+| `simulator` | RPC bundle simulation: per-tx or atomic `simulateBundle` | ✅ `--sim-rpc-url` (+ `--sim-atomic`) |
 | `metrics` | process-wide counters; periodic log snapshot + Prometheus render | ✅ new |
 | `auth` | `AuthService` — ed25519 challenge/response + HS256 JWT, interceptor, pubkey allowlist | ✅ real, tested |
 | `block_engine` | binary wiring all services together | ✅ builds |
@@ -64,11 +64,11 @@ This is a wiring skeleton. The MEV "brain" is intentionally absent:
 2. ~~**The auction**~~ ✅ done (step 4a) — bundles are buffered, scored by tip
    (lamports to `--tip-accounts`), and the highest tip-per-CU set that fits
    `--block-cu-limit` is emitted each `--auction-interval-ms` tick.
-3. ~~**Bundle simulation**~~ ✅ done (step 4b) — `simulator` delegates to a
-   Solana RPC (`--sim-rpc-url`, ideally your jito-solana validator): real CU
-   replaces the estimate and bundles that fail simulation are dropped. Per-tx
-   `simulateTransaction` today; jito-solana's atomic `simulateBundle` is the
-   accuracy upgrade for state-dependent bundles.
+3. ~~**Bundle simulation**~~ ✅ done — `simulator` delegates to a Solana RPC
+   (`--sim-rpc-url`, ideally your jito-solana validator): real CU replaces the
+   estimate and bundles that fail simulation are dropped. Defaults to per-tx
+   `simulateTransaction`; `--sim-atomic` uses jito-solana's atomic
+   `simulateBundle` (state-aware, accurate for dependent bundles).
 4. ~~**Leader-aware routing**~~ ✅ done — `leader_tracker` polls RPC for the
    schedule; the validator service tags each subscription with the validator's
    authenticated identity and forwards only to upcoming leaders. Enable with
