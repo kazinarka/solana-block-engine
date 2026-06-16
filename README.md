@@ -35,7 +35,7 @@ Two channels stitch the services together (see `src/block_engine/src/main.rs`):
 | `searcher` | `SearcherService` — accepts bundles | ⚠️ `send_bundle` works; rest `unimplemented!()` |
 | `auth` | `AuthService` — ed25519 challenge/response + HS256 JWT, interceptor, pubkey allowlist | ✅ real, tested |
 | `block_engine` | binary wiring all services together | ✅ builds |
-| `searcher_client` | test "bundle blaster" | ⛔ excluded — pins solana 1.14, needs Agave 2.x port |
+| `searcher_client` | test "bundle blaster" (authenticates, then streams bundles) | ✅ ported to Agave 2.x; not in default build |
 
 ## Build & run
 
@@ -66,12 +66,26 @@ This is a wiring skeleton. The MEV "brain" is intentionally absent:
    relayer only forwards transactions touching contended state.
 6. **Expiry handling** — `expiry_ms` on incoming packet batches is ignored.
 
+## Testing end-to-end
+
+The default build excludes the heavy Solana client. Build the blaster explicitly:
+
+```bash
+cargo build -p jito-searcher-client
+# pubkey must be in the engine's allowlist:
+ALLOWED_PUBKEYS=$(solana-keygen pubkey ~/.config/solana/id.json) \
+  AUTH_JWT_SECRET=dev ./target/release/jito-block-engine &
+./target/debug/jito-searcher-client --keypair-path ~/.config/solana/id.json
+```
+
+The client authenticates via the ed25519 handshake, then streams bundles
+(needs a local validator/RPC for the airdrop + blockhash steps).
+
 ## Next steps (see task list)
 
-- Port `searcher_client` to Agave 2.x so you can blast test bundles end-to-end.
-- Implement the real auth server.
-- Add leader-schedule tracking + targeted routing.
-- Add bundle simulation + auction.
+- Add leader-schedule tracking + targeted routing (stop fanning out to all validators).
+- Add bundle simulation + auction (the core MEV brain).
+- Per-role token enforcement (VALIDATOR tokens only on the validator service, etc.).
 
 ## Provenance
 

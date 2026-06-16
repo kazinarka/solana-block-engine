@@ -7,12 +7,18 @@ members = [
     "src/relayer",
     "src/searcher",
     "src/block_engine",
-]
-# The searcher_client (test "bundle blaster") still pins 2022-era solana-client
-# 1.14 and won't build on a modern toolchain. Excluded until it's ported to
-# Agave 2.x — see task list / README "Next steps".
-exclude = [
     "src/searcher_client",
+]
+# `cargo build` / `cargo test` only touch these. The searcher_client (test
+# "bundle blaster") pulls the heavy Solana client tree, so it's kept out of the
+# default set — build it explicitly with `cargo build -p jito-searcher-client`.
+default-members = [
+    "src/jito_protos",
+    "src/auth",
+    "src/validator",
+    "src/relayer",
+    "src/searcher",
+    "src/block_engine",
 ]
 
 # Shared dependency versions for the whole workspace. Bumping here keeps every
