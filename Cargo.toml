@@ -19,6 +19,10 @@ members = [
 default-members = [
     "src/jito_protos",
     "src/auth",
+    "src/auction",
+    "src/simulator",
+    "src/interest",
+    "src/leader_tracker",
     "src/validator",
     "src/relayer",
     "src/searcher",

@@ -97,6 +97,15 @@ struct Args {
     /// bundle that referenced it was submitted.
     #[clap(long, env, default_value_t = 2_000)]
     interest_ttl_ms: u64,
+
+    /// Base58 pubkey that collects the block-builder fee (returned to validators
+    /// via GetBlockBuilderFeeInfo). Defaults to the system pubkey placeholder.
+    #[clap(long, env, default_value = "11111111111111111111111111111111")]
+    block_builder_pubkey: String,
+
+    /// Block-builder commission percent (0-100).
+    #[clap(long, env, default_value_t = 5)]
+    block_builder_commission: u64,
 }
 
 fn main() {
@@ -260,8 +269,13 @@ fn main() {
 
         // start validator server (token-protected)
         let interceptor = AuthInterceptor::for_role(auth_state.clone(), Role::Validator as i32);
-        let validator_impl =
-            ValidatorServerImpl::new(bundle_receiver, packet_receiver, leader_tracker);
+        let validator_impl = ValidatorServerImpl::new(
+            bundle_receiver,
+            packet_receiver,
+            leader_tracker,
+            args.block_builder_pubkey,
+            args.block_builder_commission,
+        );
         let validator_svc =
             BlockEngineValidatorServer::with_interceptor(validator_impl, interceptor);
         info!("starting validator server at {}", args.validator_addr);

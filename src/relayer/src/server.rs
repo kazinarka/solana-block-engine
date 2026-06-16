@@ -22,7 +22,7 @@
 //!     before the relayer's ~200ms hold elapses.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use jito_interest::InterestRegistry;
 use jito_protos::block_engine::{
@@ -42,10 +42,10 @@ use tonic::{Request, Response, Status, Streaming};
 const UPDATE_INTERVAL: Duration = Duration::from_secs(5);
 
 pub struct RelayerServerImpl {
-    /// Sends packet batches received from the relayer into the validator
-    /// forwarder. This is the `packet_sender` half that `main.rs` previously
-    /// left unused (`_packet_sender`).
-    packet_sender: Sender<PacketBatch>,
+    /// Sends packet batches (with an optional expiry deadline) into the
+    /// validator forwarder. This is the `packet_sender` half that `main.rs`
+    /// previously left unused (`_packet_sender`).
+    packet_sender: Sender<(PacketBatch, Option<Instant>)>,
     /// Source of accounts/programs of interest, derived from submitted bundles.
     interest: Arc<InterestRegistry>,
     /// If true, advertise `"*"` (forward everything) instead of the derived set.
@@ -54,7 +54,7 @@ pub struct RelayerServerImpl {
 
 impl RelayerServerImpl {
     pub fn new(
-        packet_sender: Sender<PacketBatch>,
+        packet_sender: Sender<(PacketBatch, Option<Instant>)>,
         interest: Arc<InterestRegistry>,
         forward_all: bool,
     ) -> Self {
@@ -161,10 +161,14 @@ impl BlockEngineRelayer for RelayerServerImpl {
                     Ok(Some(update)) => match update.msg {
                         Some(Msg::Batches(expiring)) => {
                             if let Some(batch) = expiring.batch {
-                                // TODO: honor `expiring.expiry_ms` — drop the
-                                // batch if we can't act before the relayer
-                                // forwards it directly to the validator.
-                                if packet_sender.send(batch).await.is_err() {
+                                // Translate the relayer's expiry window into an
+                                // engine-local deadline. 0 => no expiry.
+                                let deadline = if expiring.expiry_ms == 0 {
+                                    None
+                                } else {
+                                    Some(Instant::now() + Duration::from_millis(expiring.expiry_ms as u64))
+                                };
+                                if packet_sender.send((batch, deadline)).await.is_err() {
                                     warn!("validator forwarder gone, ending relayer stream");
                                     break;
                                 }

@@ -75,7 +75,12 @@ This is a wiring skeleton. The MEV "brain" is intentionally absent:
    derives writable accounts + invoked programs from submitted bundles, and the
    relayer service streams them (use `--forward-all-packets` for the old "*"
    behaviour).
-6. **Expiry handling** — `expiry_ms` on incoming packet batches is ignored.
+6. ~~**Expiry handling**~~ ✅ done — each packet batch carries an engine-local
+   deadline derived from the relayer's `expiry_ms`; the validator forwarder
+   drops batches past their deadline instead of forwarding stale packets.
+
+The block-builder fee info is now configurable too (`--block-builder-pubkey`,
+`--block-builder-commission`) instead of an all-1s placeholder.
 
 ## Testing end-to-end
 

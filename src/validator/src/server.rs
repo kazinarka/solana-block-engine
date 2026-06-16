@@ -10,11 +10,12 @@ use jito_protos::{
     },
     bundle::BundleUuid,
 };
-use log::{info, warn};
+use log::{debug, info, warn};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::{Builder, JoinHandle};
+use std::time::Instant;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio_stream::wrappers::ReceiverStream;
@@ -31,10 +32,19 @@ struct Subscription<T> {
 type PacketSubs = Arc<Mutex<HashMap<Uuid, Subscription<SubscribePacketsResponse>>>>;
 type BundleSubs = Arc<Mutex<HashMap<Uuid, Subscription<SubscribeBundlesResponse>>>>;
 
+/// A packet batch with an optional engine-local deadline (derived from the
+/// relayer's `expiry_ms`); batches past their deadline are dropped, not
+/// forwarded. `None` means no expiry.
+pub type ExpiringBatch = (PacketBatch, Option<Instant>);
+
 pub struct ValidatorServerImpl {
     forwarder_thread: JoinHandle<()>,
     packet_subscriptions: PacketSubs,
     bundle_subscriptions: BundleSubs,
+    /// Pubkey that collects the block-builder fee (tip distribution account).
+    block_builder_pubkey: String,
+    /// Block-builder commission (0-100).
+    block_builder_commission: u64,
 }
 
 /// Should this subscriber receive traffic right now? Yes if no leader tracker is
@@ -59,8 +69,10 @@ fn identity_of<T>(req: &Request<T>) -> String {
 impl ValidatorServerImpl {
     pub fn new(
         bundle_receiver: Receiver<BundleUuid>,
-        packet_receiver: Receiver<PacketBatch>,
+        packet_receiver: Receiver<ExpiringBatch>,
         leader_tracker: Option<Arc<LeaderTracker>>,
+        block_builder_pubkey: String,
+        block_builder_commission: u64,
     ) -> Self {
         let packet_subscriptions = Arc::new(Mutex::new(HashMap::default()));
         let bundle_subscriptions = Arc::new(Mutex::new(HashMap::default()));
@@ -75,6 +87,8 @@ impl ValidatorServerImpl {
             forwarder_thread,
             packet_subscriptions,
             bundle_subscriptions,
+            block_builder_pubkey,
+            block_builder_commission,
         }
     }
 
@@ -84,7 +98,7 @@ impl ValidatorServerImpl {
 
     fn start_forwarder_thread(
         mut bundle_receiver: Receiver<BundleUuid>,
-        mut packet_receiver: Receiver<PacketBatch>,
+        mut packet_receiver: Receiver<ExpiringBatch>,
         packet_subscriptions: &PacketSubs,
         bundle_subscriptions: &BundleSubs,
         leader_tracker: Option<Arc<LeaderTracker>>,
@@ -102,7 +116,12 @@ impl ValidatorServerImpl {
                     loop {
                         tokio::select! {
                             maybe_packet_batch = packet_receiver.recv() => {
-                                if let Some(packet_batch) = maybe_packet_batch {
+                                if let Some((packet_batch, deadline)) = maybe_packet_batch {
+                                    // Drop batches whose relayer-given window has elapsed.
+                                    if matches!(deadline, Some(d) if Instant::now() > d) {
+                                        debug!("dropping expired packet batch");
+                                        continue;
+                                    }
                                     let failed_sends = Self::forward_packets(packet_batch, &packet_subscriptions, &leader_tracker).await;
                                     for uuid in failed_sends {
                                         info!("removing packet_subscriptions uuid: {:?}", uuid);
@@ -233,12 +252,9 @@ impl BlockEngineValidator for ValidatorServerImpl {
         &self,
         _request: Request<BlockBuilderFeeInfoRequest>,
     ) -> Result<Response<BlockBuilderFeeInfoResponse>, Status> {
-        // TODO: return the block builder's real tip-distribution pubkey. The
-        // all-1s base58 string is `Pubkey::default()` (32 zero bytes) — a
-        // placeholder so this crate needn't depend on solana-sdk.
         let response = BlockBuilderFeeInfoResponse {
-            pubkey: "11111111111111111111111111111111".to_string(),
-            commission: 5,
+            pubkey: self.block_builder_pubkey.clone(),
+            commission: self.block_builder_commission,
         };
 
         info!("get_block_builder_fee_info response: {:?}", response);
