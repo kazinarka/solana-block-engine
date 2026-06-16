@@ -85,8 +85,9 @@ The block-builder fee info is now configurable too (`--block-builder-pubkey`,
 
 7. ~~**Observability & shutdown**~~ ✅ done — the `metrics` crate tracks
    bundles received/won/dropped, packets received/forwarded/expired, and auth
-   challenges/success/failures, logged every 30s (and renderable in Prometheus
-   text format). The engine drains all servers cleanly on SIGINT/SIGTERM.
+   challenges/success/failures, logged every 30s and scrapable at
+   `GET /metrics` (`--metrics-addr`, default `0.0.0.0:9900`). The engine drains
+   all servers cleanly on SIGINT/SIGTERM.
 
 ## Testing end-to-end
 

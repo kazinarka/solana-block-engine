@@ -106,6 +106,10 @@ struct Args {
     /// Block-builder commission percent (0-100).
     #[clap(long, env, default_value_t = 5)]
     block_builder_commission: u64,
+
+    /// Address to serve the Prometheus metrics endpoint (GET /metrics).
+    #[clap(long, env, default_value = "0.0.0.0:9900")]
+    metrics_addr: SocketAddr,
 }
 
 /// Resolves once the shutdown signal fires; passed to each server's
@@ -182,6 +186,27 @@ fn main() {
                 jito_metrics::log_snapshot();
             }
         });
+
+        // Prometheus scrape endpoint: GET /metrics.
+        {
+            let metrics_addr = args.metrics_addr;
+            let shutdown_rx = shutdown_rx.clone();
+            tokio::spawn(async move {
+                let app = axum::Router::new().route(
+                    "/metrics",
+                    axum::routing::get(|| async { jito_metrics::render_prometheus() }),
+                );
+                match tokio::net::TcpListener::bind(metrics_addr).await {
+                    Ok(listener) => {
+                        info!("serving Prometheus metrics at {metrics_addr}/metrics");
+                        let _ = axum::serve(listener, app)
+                            .with_graceful_shutdown(wait_shutdown(shutdown_rx))
+                            .await;
+                    }
+                    Err(e) => warn!("could not bind metrics endpoint {metrics_addr}: {e}"),
+                }
+            });
+        }
 
         // Leader-schedule tracker for routing. None => forward to all.
         let leader_tracker = match args.leader_rpc_url {
