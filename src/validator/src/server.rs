@@ -251,6 +251,7 @@ impl BlockEngineValidator for ValidatorServerImpl {
         let uuid = Uuid::new_v4();
 
         info!("adding bundle subscription uuid={uuid:?} identity={identity}");
+        jito_metrics::inc_validator_subscriptions();
         self.bundle_subscriptions
             .lock()
             .unwrap()

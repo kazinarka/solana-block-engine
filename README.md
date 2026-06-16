@@ -107,18 +107,25 @@ separate project.
 
 ## Testing end-to-end
 
-The default build excludes the heavy Solana client. Build the blaster explicitly:
+`scripts/e2e_test.sh` runs the whole pipeline against a local
+`solana-test-validator`: it starts the validator, runs the engine (auth +
+auction + per-tx simulation + on-chain tracking), connects a VALIDATOR-role
+bundle subscriber (`validator_sub`), blasts bundles with the searcher client,
+and asserts they traverse auth → auction → simulate → forward → subscriber.
 
 ```bash
-cargo build -p jito-searcher-client
-# pubkey must be in the engine's allowlist:
-ALLOWED_PUBKEYS=$(solana-keygen pubkey ~/.config/solana/id.json) \
-  AUTH_JWT_SECRET=dev ./target/release/jito-block-engine &
-./target/debug/jito-searcher-client --keypair-path ~/.config/solana/id.json
+./scripts/e2e_test.sh
+# ... E2E PASS: bundles flowed auth -> auction -> forward -> validator subscriber
 ```
 
-The client authenticates via the ed25519 handshake, then streams bundles
-(needs a local validator/RPC for the airdrop + blockhash steps).
+The two test binaries it uses (not in the default build):
+
+```bash
+cargo build -p jito-searcher-client      # builds jito-searcher-client + validator_sub
+```
+
+- `jito-searcher-client` — authenticates as SEARCHER, airdrops, blasts bundles.
+- `validator_sub` — authenticates as VALIDATOR, subscribes to the bundle stream.
 
 ## Provenance
 
