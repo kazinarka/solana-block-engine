@@ -13,11 +13,26 @@ use crate::token::{AuthState, Claims};
 #[derive(Clone)]
 pub struct AuthInterceptor {
     state: Arc<AuthState>,
+    /// If `Some`, the token's role must equal this (RELAYER=0, SEARCHER=1,
+    /// VALIDATOR=2). If `None`, any authenticated role is accepted.
+    required_role: Option<i32>,
 }
 
 impl AuthInterceptor {
+    /// Accept any authenticated client regardless of role.
     pub fn new(state: Arc<AuthState>) -> Self {
-        Self { state }
+        Self {
+            state,
+            required_role: None,
+        }
+    }
+
+    /// Accept only clients whose token carries `role`.
+    pub fn for_role(state: Arc<AuthState>, role: i32) -> Self {
+        Self {
+            state,
+            required_role: Some(role),
+        }
     }
 }
 
@@ -38,6 +53,15 @@ impl Interceptor for AuthInterceptor {
         if claims.refresh {
             // A refresh token must never be accepted as an access credential.
             return Err(Status::unauthenticated("refresh token not valid for access"));
+        }
+
+        if let Some(required) = self.required_role {
+            if claims.role != required {
+                return Err(Status::permission_denied(format!(
+                    "token role {} not permitted on this service (requires role {required})",
+                    claims.role
+                )));
+            }
         }
 
         // Stash claims so handlers can read the caller's pubkey/role if needed.

@@ -11,6 +11,7 @@ use jito_auth::server::{random_secret, spawn_challenge_pruner, AuthServiceImpl};
 use jito_auth::token::AuthState;
 use jito_interest::InterestRegistry;
 use jito_protos::auth::auth_service_server::AuthServiceServer;
+use jito_protos::auth::Role;
 use jito_protos::block_engine::block_engine_relayer_server::BlockEngineRelayerServer;
 use jito_protos::block_engine::block_engine_validator_server::BlockEngineValidatorServer;
 use jito_protos::searcher::searcher_service_server::SearcherServiceServer;
@@ -206,7 +207,7 @@ fn main() {
 
         // start searcher server (token-protected)
         {
-            let interceptor = AuthInterceptor::new(auth_state.clone());
+            let interceptor = AuthInterceptor::for_role(auth_state.clone(), Role::Searcher as i32);
             let auction = auction.clone();
             let interest = interest.clone();
             tokio::spawn(async move {
@@ -225,7 +226,7 @@ fn main() {
         // start relayer server (token-protected) — ingests packets from the
         // relayer into the validator forwarder
         {
-            let interceptor = AuthInterceptor::new(auth_state.clone());
+            let interceptor = AuthInterceptor::for_role(auth_state.clone(), Role::Relayer as i32);
             let interest = interest.clone();
             let forward_all = args.forward_all_packets;
             tokio::spawn(async move {
@@ -258,7 +259,7 @@ fn main() {
         }
 
         // start validator server (token-protected)
-        let interceptor = AuthInterceptor::new(auth_state.clone());
+        let interceptor = AuthInterceptor::for_role(auth_state.clone(), Role::Validator as i32);
         let validator_impl =
             ValidatorServerImpl::new(bundle_receiver, packet_receiver, leader_tracker);
         let validator_svc =

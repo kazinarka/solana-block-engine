@@ -68,7 +68,7 @@ impl AuthService for AuthServiceImpl {
             ));
         }
 
-        let challenge = self.state.create_challenge(&pubkey);
+        let challenge = self.state.create_challenge(&pubkey, inner.role);
         info!("issued auth challenge to {pubkey} (role={})", inner.role);
         Ok(Response::new(GenerateAuthChallengeResponse { challenge }))
     }
@@ -84,8 +84,9 @@ impl AuthService for AuthServiceImpl {
             return Err(Status::permission_denied("pubkey is not authorized"));
         }
 
-        // Look up (and consume) the challenge we previously issued.
-        let stored = self.state.take_challenge(&pubkey).ok_or_else(|| {
+        // Look up (and consume) the challenge we previously issued, along with
+        // the role it was requested for.
+        let (stored, role) = self.state.take_challenge(&pubkey).ok_or_else(|| {
             Status::permission_denied(
                 "no active challenge; call GenerateAuthChallenge first (or it expired)",
             )
@@ -120,10 +121,8 @@ impl AuthService for AuthServiceImpl {
             .verify(inner.challenge.as_bytes(), &signature)
             .map_err(|_| Status::permission_denied("challenge signature verification failed"))?;
 
-        // Issue tokens. Role is informational for now; per-role endpoint
-        // enforcement (e.g. only VALIDATOR tokens on the validator service) is
-        // a follow-up.
-        let role = 0;
+        // Issue tokens carrying the role the client authenticated for; the
+        // per-service interceptors enforce it.
         let (access, access_exp) = self.state.issue(&pubkey, role, false)?;
         let (refresh, refresh_exp) = self.state.issue(&pubkey, role, true)?;
         info!("authenticated {pubkey}; issued access + refresh tokens");

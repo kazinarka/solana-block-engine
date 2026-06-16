@@ -57,7 +57,8 @@ This is a wiring skeleton. The MEV "brain" is intentionally absent:
 
 1. ~~**Real auth**~~ ✅ done — ed25519 challenge/response + HS256 JWT in
    `src/auth/`, enforced via an interceptor on the validator/relayer/searcher
-   services, with a configurable pubkey allowlist (`--allowed-pubkeys`).
+   services, with a configurable pubkey allowlist (`--allowed-pubkeys`) and
+   per-role scoping (a SEARCHER token can't subscribe on the validator service).
 2. ~~**The auction**~~ ✅ done (step 4a) — bundles are buffered, scored by tip
    (lamports to `--tip-accounts`), and the highest tip-per-CU set that fits
    `--block-cu-limit` is emitted each `--auction-interval-ms` tick.
@@ -95,7 +96,6 @@ The client authenticates via the ed25519 handshake, then streams bundles
 
 - Add leader-schedule tracking + targeted routing (stop fanning out to all validators).
 - Add bundle simulation + auction (the core MEV brain).
-- Per-role token enforcement (VALIDATOR tokens only on the validator service, etc.).
 
 ## Provenance
 

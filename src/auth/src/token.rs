@@ -28,6 +28,8 @@ pub struct Claims {
 
 struct ChallengeEntry {
     challenge: String,
+    /// Role the client requested at challenge time; carried into the token.
+    role: i32,
     expires_at: Instant,
 }
 
@@ -62,25 +64,28 @@ impl AuthState {
         }
     }
 
-    /// Generate, store, and return a fresh challenge nonce for a pubkey.
-    pub fn create_challenge(&self, pubkey_b58: &str) -> String {
+    /// Generate, store, and return a fresh challenge nonce for a pubkey,
+    /// remembering the role it's authenticating for.
+    pub fn create_challenge(&self, pubkey_b58: &str, role: i32) -> String {
         let challenge = uuid::Uuid::new_v4().to_string();
         let mut map = self.challenges.lock().unwrap();
         map.insert(
             pubkey_b58.to_string(),
             ChallengeEntry {
                 challenge: challenge.clone(),
+                role,
                 expires_at: Instant::now() + self.challenge_ttl,
             },
         );
         challenge
     }
 
-    /// Consume (remove) a non-expired challenge for a pubkey, if present.
-    pub fn take_challenge(&self, pubkey_b58: &str) -> Option<String> {
+    /// Consume (remove) a non-expired challenge for a pubkey, returning the
+    /// challenge nonce and the role it was issued for.
+    pub fn take_challenge(&self, pubkey_b58: &str) -> Option<(String, i32)> {
         let mut map = self.challenges.lock().unwrap();
         match map.remove(pubkey_b58) {
-            Some(entry) if entry.expires_at > Instant::now() => Some(entry.challenge),
+            Some(entry) if entry.expires_at > Instant::now() => Some((entry.challenge, entry.role)),
             _ => None,
         }
     }

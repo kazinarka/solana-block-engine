@@ -98,6 +98,31 @@ async fn full_handshake_issues_usable_access_token() {
 }
 
 #[tokio::test]
+async fn interceptor_enforces_role() {
+    let (sk, pubkey, pubkey_b58) = test_keypair();
+    let state = state_allowing(&pubkey_b58);
+    let svc = AuthServiceImpl::new(state.clone());
+
+    // do_handshake authenticates as role 2 (VALIDATOR).
+    let (access, _refresh) = do_handshake(&svc, &sk, pubkey).await;
+
+    // A VALIDATOR-scoped interceptor accepts the token...
+    let mut validator_ic = AuthInterceptor::for_role(state.clone(), 2);
+    let mut req = Request::new(());
+    req.metadata_mut()
+        .insert("authorization", format!("Bearer {access}").parse().unwrap());
+    assert!(validator_ic.call(req).is_ok(), "validator token on validator service");
+
+    // ...but a SEARCHER-scoped interceptor rejects it (role mismatch), proving
+    // the requested role propagates from challenge into the issued token.
+    let mut searcher_ic = AuthInterceptor::for_role(state.clone(), 1);
+    let mut req = Request::new(());
+    req.metadata_mut()
+        .insert("authorization", format!("Bearer {access}").parse().unwrap());
+    assert!(searcher_ic.call(req).is_err(), "validator token rejected on searcher service");
+}
+
+#[tokio::test]
 async fn refresh_token_yields_new_access_token() {
     let (sk, pubkey, pubkey_b58) = test_keypair();
     let state = state_allowing(&pubkey_b58);
