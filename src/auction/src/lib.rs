@@ -248,6 +248,7 @@ impl Auction {
 
         jito_metrics::add_bundles_won(winners.len() as u64);
         jito_metrics::add_bundles_dropped((entered - winners.len()) as u64);
+        jito_metrics::add_tips_lamports(total_tip);
         if !winners.is_empty() {
             info!(
                 "auction: {} winners, {} lamports tip, {} CU used",

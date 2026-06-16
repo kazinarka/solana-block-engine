@@ -36,7 +36,8 @@ Two channels stitch the services together (see `src/block_engine/src/main.rs`):
 | `leader_tracker` | polls RPC for the leader schedule; answers "is X leading soon?" | ✅ new |
 | `searcher` | `SearcherService` — accepts bundles; streams bundle results | ✅ `send_bundle` + `SubscribeBundleResults`; some RPCs `unimplemented!()` |
 | `results` | routes per-bundle outcomes back to the submitting searcher | ✅ new |
-| `auction` | scores bundles by tip, packs winners under a CU budget | ✅ tip + real-CU/validity from simulation |
+| `tracker` | polls RPC for forwarded bundles; emits Processed/Finalized/Dropped | ✅ new (`--tracker-rpc-url`) |
+| `auction` | scores bundles by tip, packs winners under a CU budget; accrues tip revenue | ✅ tip + real-CU/validity from simulation |
 | `simulator` | RPC bundle simulation: per-tx or atomic `simulateBundle` | ✅ `--sim-rpc-url` (+ `--sim-atomic`) |
 | `metrics` | process-wide counters; periodic log snapshot + Prometheus render | ✅ new |
 | `auth` | `AuthService` — ed25519 challenge/response + HS256 JWT, interceptor, pubkey allowlist | ✅ real, tested |
@@ -53,9 +54,9 @@ RUST_LOG=info ./target/release/jito-block-engine
 Default bind addresses (override via flags or env): searcher `:1234`,
 validator `:1003`, relayer `:1004`, auth `:1005`.
 
-## What this is NOT yet (the hard, closed-source parts Jito never published)
+## Implementation status (the parts Jito never open-sourced)
 
-This is a wiring skeleton. The MEV "brain" is intentionally absent:
+The full MEV pipeline is implemented and tested:
 
 1. ~~**Real auth**~~ ✅ done — ed25519 challenge/response + HS256 JWT in
    `src/auth/`, enforced via an interceptor on the validator/relayer/searcher
@@ -85,10 +86,24 @@ The block-builder fee info is now configurable too (`--block-builder-pubkey`,
 `--block-builder-commission`) instead of an all-1s placeholder.
 
 7. ~~**Observability & shutdown**~~ ✅ done — the `metrics` crate tracks
-   bundles received/won/dropped, packets received/forwarded/expired, and auth
-   challenges/success/failures, logged every 30s and scrapable at
-   `GET /metrics` (`--metrics-addr`, default `0.0.0.0:9900`). The engine drains
-   all servers cleanly on SIGINT/SIGTERM.
+   bundles received/won/dropped, accrued tip lamports, packets
+   received/forwarded/expired, and auth challenges/success/failures, logged
+   every 30s and scrapable at `GET /metrics` (`--metrics-addr`, default
+   `0.0.0.0:9900`). The engine drains all servers cleanly on SIGINT/SIGTERM.
+8. ~~**Bundle results**~~ ✅ done — searchers stream `SubscribeBundleResults`;
+   the auction reports accepted/rejected and the `tracker`
+   (`--tracker-rpc-url`) reports on-chain Processed/Finalized/Dropped.
+9. ~~**Region discovery**~~ ✅ done — `GetBlockEngineEndpoints` advertises the
+   configured `--block-engine-url` + `--regioned-endpoint`s.
+10. ~~**Tip accounting**~~ ✅ done — won-bundle tips accrue to the
+    `tips_lamports_total` metric.
+
+**Genuinely out of scope** (a separate on-chain component, not engine code): the
+TipPaymentProgram / TipDistributionProgram that perform the *on-chain* merkle
+payout of accrued tips to validators and stakers. The engine does the off-chain
+accounting and tells validators which pubkey collects the fee
+(`GetBlockBuilderFeeInfo`); deploying/operating those Anchor programs is a
+separate project.
 
 ## Testing end-to-end
 
@@ -104,11 +119,6 @@ ALLOWED_PUBKEYS=$(solana-keygen pubkey ~/.config/solana/id.json) \
 
 The client authenticates via the ed25519 handshake, then streams bundles
 (needs a local validator/RPC for the airdrop + blockhash steps).
-
-## Next steps (see task list)
-
-- Add leader-schedule tracking + targeted routing (stop fanning out to all validators).
-- Add bundle simulation + auction (the core MEV brain).
 
 ## Provenance
 

@@ -40,6 +40,7 @@ counters! {
     BUNDLES_RECEIVED => "bundles_received_total",
     BUNDLES_WON => "bundles_won_total",
     BUNDLES_DROPPED => "bundles_dropped_total",
+    TIPS_LAMPORTS => "tips_lamports_total",
     PACKETS_RECEIVED => "packets_received_total",
     PACKETS_FORWARDED => "packets_forwarded_total",
     PACKETS_EXPIRED => "packets_expired_total",
@@ -57,6 +58,10 @@ pub fn add_bundles_won(n: u64) {
 }
 pub fn add_bundles_dropped(n: u64) {
     BUNDLES_DROPPED.fetch_add(n, Relaxed);
+}
+/// Accrue tip lamports earned by the winning bundles (block-builder revenue).
+pub fn add_tips_lamports(n: u64) {
+    TIPS_LAMPORTS.fetch_add(n, Relaxed);
 }
 pub fn inc_packets_received() {
     PACKETS_RECEIVED.fetch_add(1, Relaxed);
