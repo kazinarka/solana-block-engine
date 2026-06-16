@@ -2207,6 +2207,7 @@ dependencies = [
  "jito-results",
  "jito-searcher",
  "jito-simulator",
+ "jito-tracker",
  "jito-validator",
  "log",
  "tokio",
@@ -2321,6 +2322,20 @@ dependencies = [
  "serde_json",
  "solana-client",
  "solana-sdk",
+]
+
+[[package]]
+name = "jito-tracker"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "jito-protos",
+ "jito-results",
+ "log",
+ "solana-client",
+ "solana-sdk",
+ "solana-transaction-status-client-types",
+ "tokio",
 ]
 
 [[package]]

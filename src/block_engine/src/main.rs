@@ -20,6 +20,7 @@ use jito_leader_tracker::LeaderTracker;
 use jito_relayer_service::server::RelayerServerImpl;
 use jito_results::BundleResults;
 use jito_simulator::RpcSimulator;
+use jito_tracker::BundleTracker;
 use jito_searcher::server::SearcherServiceImpl;
 use jito_validator::server::ValidatorServerImpl;
 use log::{info, warn};
@@ -95,6 +96,16 @@ struct Args {
     /// bundles whose later transactions depend on earlier ones.
     #[clap(long, env = "SIM_ATOMIC")]
     sim_atomic: bool,
+
+    /// Solana RPC url used to track forwarded bundles on-chain and report
+    /// Processed/Finalized/Dropped results to searchers. Unset => no tracking.
+    #[clap(long, env = "TRACKER_RPC_URL")]
+    tracker_rpc_url: Option<String>,
+
+    /// Seconds to wait for a forwarded bundle to land before reporting it
+    /// dropped.
+    #[clap(long, env, default_value_t = 90)]
+    tracker_deadline_secs: u64,
 
     /// Forward ALL packets from the relayer (advertise "*") instead of only the
     /// accounts/programs of interest derived from submitted bundles.
@@ -271,6 +282,34 @@ fn main() {
         // Hub that routes per-bundle results back to the submitting searcher.
         let results = Arc::new(BundleResults::new());
 
+        // Evict stale uuid->owner mappings for bundles that never resolve.
+        {
+            let results = results.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(30));
+                loop {
+                    interval.tick().await;
+                    results.prune(Duration::from_secs(180));
+                }
+            });
+        }
+
+        // Optional on-chain tracker: reports Processed/Finalized/Dropped.
+        let tracker = match args.tracker_rpc_url {
+            Some(url) => {
+                info!("on-chain bundle result tracking enabled via RPC {url}");
+                Some(BundleTracker::start(
+                    url,
+                    results.clone(),
+                    Duration::from_secs(args.tracker_deadline_secs),
+                ))
+            }
+            None => {
+                warn!("TRACKER_RPC_URL not set; searchers won't get on-chain bundle results");
+                None
+            }
+        };
+
         // The auction buffers bundles from searchers and, on each tick, emits the
         // winning set to the validator via `bundle_sender`.
         let auction = Arc::new(
@@ -301,6 +340,7 @@ fn main() {
         {
             let auction = auction.clone();
             let simulator = simulator.clone();
+            let tracker = tracker.clone();
             let interval_ms = args.auction_interval_ms;
             tokio::spawn(async move {
                 let mut interval = tokio::time::interval(Duration::from_millis(interval_ms));
@@ -313,6 +353,10 @@ fn main() {
                         }
                     }
                     for winner in auction.run_auction() {
+                        // Begin on-chain tracking before handing off the bundle.
+                        if let Some(t) = &tracker {
+                            t.track(&winner);
+                        }
                         if bundle_sender.send(winner).await.is_err() {
                             warn!("validator bundle channel closed; stopping auction tick");
                             return;

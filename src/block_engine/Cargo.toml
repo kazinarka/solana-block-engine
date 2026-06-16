@@ -12,6 +12,7 @@ jito-leader-tracker = { path = "../leader_tracker" }
 jito-metrics = { path = "../metrics" }
 jito-results = { path = "../results" }
 jito-simulator = { path = "../simulator" }
+jito-tracker = { path = "../tracker" }
 jito-protos = { path = "../jito_protos" }
 jito-relayer-service = { path = "../relayer" }
 jito-searcher = { path = "../searcher" }
