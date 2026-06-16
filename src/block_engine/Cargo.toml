@@ -8,6 +8,7 @@ publish = false
 jito-auction = { path = "../auction" }
 jito-auth = { path = "../auth" }
 jito-leader-tracker = { path = "../leader_tracker" }
+jito-simulator = { path = "../simulator" }
 jito-protos = { path = "../jito_protos" }
 jito-relayer-service = { path = "../relayer" }
 jito-searcher = { path = "../searcher" }

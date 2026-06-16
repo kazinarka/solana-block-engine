@@ -27,8 +27,18 @@ use solana_sdk::system_instruction::SystemInstruction;
 use solana_sdk::system_program;
 use solana_sdk::transaction::VersionedTransaction;
 
-/// Rough per-transaction compute-unit estimate used until real simulation lands.
+/// Rough per-transaction compute-unit estimate, used for bundles that haven't
+/// been simulated yet (or when no simulator is configured).
 pub const EST_CU_PER_TX: u64 = 200_000;
+
+/// Result of simulating a bundle against cluster state.
+#[derive(Clone, Copy, Debug)]
+pub struct SimOutcome {
+    /// Did every transaction in the bundle execute without error?
+    pub ok: bool,
+    /// Total compute units consumed by the bundle.
+    pub units_consumed: u64,
+}
 
 /// A bundle waiting in the auction, scored at submission time.
 struct PendingBundle {
@@ -36,6 +46,20 @@ struct PendingBundle {
     tip_lamports: u64,
     est_cu: u64,
     received: Instant,
+    /// `None` until simulated. `Some` carries the real CU + success.
+    sim: Option<SimOutcome>,
+}
+
+impl PendingBundle {
+    /// CU to charge against the block budget: real if simulated, else estimate.
+    fn cu(&self) -> u64 {
+        self.sim.map(|s| s.units_consumed).unwrap_or(self.est_cu)
+    }
+
+    /// Drop only if simulation ran and the bundle failed.
+    fn failed_simulation(&self) -> bool {
+        matches!(self.sim, Some(s) if !s.ok)
+    }
 }
 
 pub struct Auction {
@@ -89,7 +113,33 @@ impl Auction {
             tip_lamports,
             est_cu,
             received: Instant::now(),
+            sim: None,
         });
+    }
+
+    /// Bundles awaiting simulation (uuid + a clone of the bundle). The caller
+    /// simulates them off-lock, then reports back via [`set_simulation`].
+    pub fn pending_for_simulation(&self) -> Vec<(String, BundleUuid)> {
+        self.buffer
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|b| b.sim.is_none())
+            .map(|b| (b.bundle.uuid.clone(), b.bundle.clone()))
+            .collect()
+    }
+
+    /// Record a simulation result against a buffered bundle (matched by uuid).
+    pub fn set_simulation(&self, uuid: &str, outcome: SimOutcome) {
+        if let Some(b) = self
+            .buffer
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|b| b.bundle.uuid == uuid)
+        {
+            b.sim = Some(outcome);
+        }
     }
 
     /// Compute (total_tip_lamports, estimated_cu) for a bundle.
@@ -145,12 +195,16 @@ impl Auction {
         }
 
         let now = Instant::now();
-        buf.retain(|b| now.duration_since(b.received) < self.bundle_ttl);
+        // Drop expired bundles and any that failed simulation (they'd fail
+        // on-chain too, so they shouldn't take up block space).
+        buf.retain(|b| {
+            now.duration_since(b.received) < self.bundle_ttl && !b.failed_simulation()
+        });
 
         // Greedy knapsack by value density (tip per compute unit).
         buf.sort_by(|a, b| {
-            let da = a.tip_lamports as f64 / a.est_cu.max(1) as f64;
-            let db = b.tip_lamports as f64 / b.est_cu.max(1) as f64;
+            let da = a.tip_lamports as f64 / a.cu().max(1) as f64;
+            let db = b.tip_lamports as f64 / b.cu().max(1) as f64;
             db.partial_cmp(&da).unwrap_or(std::cmp::Ordering::Equal)
         });
 
@@ -158,8 +212,9 @@ impl Auction {
         let mut used_cu = 0u64;
         let mut total_tip = 0u64;
         for pb in buf.drain(..) {
-            if used_cu.saturating_add(pb.est_cu) <= self.cu_budget {
-                used_cu += pb.est_cu;
+            let cu = pb.cu();
+            if used_cu.saturating_add(cu) <= self.cu_budget {
+                used_cu += cu;
                 total_tip = total_tip.saturating_add(pb.tip_lamports);
                 winners.push(pb.bundle);
             }

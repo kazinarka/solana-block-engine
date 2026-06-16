@@ -15,6 +15,7 @@ use jito_protos::block_engine::block_engine_validator_server::BlockEngineValidat
 use jito_protos::searcher::searcher_service_server::SearcherServiceServer;
 use jito_leader_tracker::LeaderTracker;
 use jito_relayer_service::server::RelayerServerImpl;
+use jito_simulator::RpcSimulator;
 use jito_searcher::server::SearcherServiceImpl;
 use jito_validator::server::ValidatorServerImpl;
 use log::{info, warn};
@@ -78,6 +79,12 @@ struct Args {
     /// Bundles older than this (ms) are dropped before each auction.
     #[clap(long, env, default_value_t = 200)]
     bundle_ttl_ms: u64,
+
+    /// Solana RPC url used to simulate bundles (real CU + drop failing bundles).
+    /// If unset, bundles are scored with the coarse CU estimate and never
+    /// dropped for failing. Can be the same RPC as --leader-rpc-url.
+    #[clap(long, env = "SIM_RPC_URL")]
+    sim_rpc_url: Option<String>,
 }
 
 fn main() {
@@ -131,14 +138,35 @@ fn main() {
             Duration::from_millis(args.bundle_ttl_ms),
         ));
 
-        // Auction tick: run the auction on an interval, forward winners.
+        // Optional RPC simulator: real CU + drop failing bundles. None => use
+        // the coarse CU estimate and never drop for failure.
+        let simulator = match args.sim_rpc_url {
+            Some(url) => {
+                info!("bundle simulation enabled via RPC {url}");
+                Some(Arc::new(RpcSimulator::new(url)))
+            }
+            None => {
+                warn!("SIM_RPC_URL not set; using estimated CU (no bundle simulation)");
+                None
+            }
+        };
+
+        // Auction tick: simulate any new bundles, then run the auction and
+        // forward winners.
         {
             let auction = auction.clone();
+            let simulator = simulator.clone();
             let interval_ms = args.auction_interval_ms;
             tokio::spawn(async move {
                 let mut interval = tokio::time::interval(Duration::from_millis(interval_ms));
                 loop {
                     interval.tick().await;
+                    if let Some(sim) = &simulator {
+                        for (uuid, bundle) in auction.pending_for_simulation() {
+                            let outcome = sim.simulate_bundle(&bundle).await;
+                            auction.set_simulation(&uuid, outcome);
+                        }
+                    }
                     for winner in auction.run_auction() {
                         if bundle_sender.send(winner).await.is_err() {
                             warn!("validator bundle channel closed; stopping auction tick");

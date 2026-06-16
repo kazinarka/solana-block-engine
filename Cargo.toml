@@ -4,6 +4,7 @@ members = [
     "src/jito_protos",
     "src/auth",
     "src/auction",
+    "src/simulator",
     "src/leader_tracker",
     "src/validator",
     "src/relayer",

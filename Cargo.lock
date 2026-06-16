@@ -2152,6 +2152,7 @@ dependencies = [
  "jito-protos",
  "jito-relayer-service",
  "jito-searcher",
+ "jito-simulator",
  "jito-validator",
  "log",
  "tokio",
@@ -2218,6 +2219,18 @@ dependencies = [
  "solana-sdk",
  "tokio",
  "tonic",
+]
+
+[[package]]
+name = "jito-simulator"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "jito-auction",
+ "jito-protos",
+ "log",
+ "solana-client",
+ "solana-sdk",
 ]
 
 [[package]]
