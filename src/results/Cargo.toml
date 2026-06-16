@@ -1,0 +1,14 @@
+[package]
+name = "jito-results"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "jito_results"
+path = "src/lib.rs"
+
+[dependencies]
+jito-protos = { path = "../jito_protos" }
+tokio = { workspace = true }
+tonic = { workspace = true }

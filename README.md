@@ -34,7 +34,8 @@ Two channels stitch the services together (see `src/block_engine/src/main.rs`):
 | `interest` | derives accounts/programs of interest from submitted bundles | ✅ new |
 | `validator` | `BlockEngineValidator` service — routes packets+bundles to the leading validator | ✅ leader-aware |
 | `leader_tracker` | polls RPC for the leader schedule; answers "is X leading soon?" | ✅ new |
-| `searcher` | `SearcherService` — accepts bundles into the auction | ⚠️ `send_bundle` works; rest `unimplemented!()` |
+| `searcher` | `SearcherService` — accepts bundles; streams bundle results | ✅ `send_bundle` + `SubscribeBundleResults`; some RPCs `unimplemented!()` |
+| `results` | routes per-bundle outcomes back to the submitting searcher | ✅ new |
 | `auction` | scores bundles by tip, packs winners under a CU budget | ✅ tip + real-CU/validity from simulation |
 | `simulator` | RPC-backed bundle simulation (real CU, drop failing bundles) | ✅ via `--sim-rpc-url` |
 | `metrics` | process-wide counters; periodic log snapshot + Prometheus render | ✅ new |

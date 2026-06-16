@@ -15,11 +15,12 @@
 
 use std::collections::HashSet;
 use std::str::FromStr;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bincode::deserialize;
 use jito_protos::bundle::BundleUuid;
+use jito_results::BundleResults;
 use jito_protos::packet::Packet;
 use log::{debug, info};
 use solana_sdk::pubkey::Pubkey;
@@ -69,6 +70,8 @@ pub struct Auction {
     cu_budget: u64,
     /// Bundles older than this are dropped before each auction.
     bundle_ttl: Duration,
+    /// Optional sink for per-bundle results delivered back to searchers.
+    results: Option<Arc<BundleResults>>,
 }
 
 impl Auction {
@@ -78,7 +81,14 @@ impl Auction {
             tip_accounts,
             cu_budget,
             bundle_ttl,
+            results: None,
         }
+    }
+
+    /// Attach a results sink so auction outcomes are reported to searchers.
+    pub fn with_results(mut self, results: Arc<BundleResults>) -> Self {
+        self.results = Some(results);
+        self
     }
 
     /// Build from CLI-style config: parse base58 tip accounts (invalid ones are
@@ -140,6 +150,11 @@ impl Auction {
             .find(|b| b.bundle.uuid == uuid)
         {
             b.sim = Some(outcome);
+        }
+        if !outcome.ok {
+            if let Some(r) = &self.results {
+                r.publish_sim_failure(uuid, "bundle failed simulation".to_string());
+            }
         }
     }
 
@@ -215,10 +230,19 @@ impl Auction {
         let mut total_tip = 0u64;
         for pb in buf.drain(..) {
             let cu = pb.cu();
+            let uuid = pb.bundle.uuid.clone();
             if used_cu.saturating_add(cu) <= self.cu_budget {
                 used_cu += cu;
                 total_tip = total_tip.saturating_add(pb.tip_lamports);
+                if let Some(r) = &self.results {
+                    // Reported as accepted/forwarded by the engine. (slot and
+                    // validator identity are populated at forward time later.)
+                    r.publish_accepted(&uuid, 0, String::new());
+                }
                 winners.push(pb.bundle);
+            } else if let Some(r) = &self.results {
+                // Bid wasn't high enough to fit the winning set this round.
+                r.publish_lost_auction(&uuid, String::new(), pb.tip_lamports);
             }
         }
 

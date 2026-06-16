@@ -17,6 +17,7 @@ use jito_protos::block_engine::block_engine_validator_server::BlockEngineValidat
 use jito_protos::searcher::searcher_service_server::SearcherServiceServer;
 use jito_leader_tracker::LeaderTracker;
 use jito_relayer_service::server::RelayerServerImpl;
+use jito_results::BundleResults;
 use jito_simulator::RpcSimulator;
 use jito_searcher::server::SearcherServiceImpl;
 use jito_validator::server::ValidatorServerImpl;
@@ -236,13 +237,19 @@ fn main() {
             });
         }
 
+        // Hub that routes per-bundle results back to the submitting searcher.
+        let results = Arc::new(BundleResults::new());
+
         // The auction buffers bundles from searchers and, on each tick, emits the
         // winning set to the validator via `bundle_sender`.
-        let auction = Arc::new(Auction::from_config(
-            &args.tip_accounts,
-            args.block_cu_limit,
-            Duration::from_millis(args.bundle_ttl_ms),
-        ));
+        let auction = Arc::new(
+            Auction::from_config(
+                &args.tip_accounts,
+                args.block_cu_limit,
+                Duration::from_millis(args.bundle_ttl_ms),
+            )
+            .with_results(results.clone()),
+        );
 
         // Optional RPC simulator: real CU + drop failing bundles. None => use
         // the coarse CU estimate and never drop for failure.
@@ -288,9 +295,10 @@ fn main() {
             let interceptor = AuthInterceptor::for_role(auth_state.clone(), Role::Searcher as i32);
             let auction = auction.clone();
             let interest = interest.clone();
+            let results = results.clone();
             let shutdown_rx = shutdown_rx.clone();
             tokio::spawn(async move {
-                let searcher_service_impl = SearcherServiceImpl::new(auction, interest);
+                let searcher_service_impl = SearcherServiceImpl::new(auction, interest, results);
                 let searcher_svc =
                     SearcherServiceServer::with_interceptor(searcher_service_impl, interceptor);
                 info!("starting searcher server at {}", args.searcher_addr);

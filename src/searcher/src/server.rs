@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use jito_auction::Auction;
+use jito_auth::token::Claims;
 use jito_interest::InterestRegistry;
 use jito_protos::bundle::{BundleResult, BundleUuid};
 use jito_protos::searcher::{
@@ -10,21 +11,40 @@ use jito_protos::searcher::{
     NextScheduledLeaderRequest, NextScheduledLeaderResponse, SendBundleRequest, SendBundleResponse,
     SubscribeBundleResultsRequest,
 };
+use jito_results::BundleResults;
 use log::info;
+use tokio::sync::mpsc::channel;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
+/// Authenticated searcher identity (base58 pubkey) from the auth interceptor.
+fn owner_of<T>(req: &Request<T>) -> String {
+    req.extensions()
+        .get::<Claims>()
+        .map(|c| c.sub.clone())
+        .unwrap_or_default()
+}
+
 pub struct SearcherServiceImpl {
     auction: Arc<Auction>,
     interest: Arc<InterestRegistry>,
+    results: Arc<BundleResults>,
 }
 
 impl SearcherServiceImpl {
     pub const MAX_BUNDLE_LEN: usize = 5;
 
-    pub fn new(auction: Arc<Auction>, interest: Arc<InterestRegistry>) -> Self {
-        SearcherServiceImpl { auction, interest }
+    pub fn new(
+        auction: Arc<Auction>,
+        interest: Arc<InterestRegistry>,
+        results: Arc<BundleResults>,
+    ) -> Self {
+        SearcherServiceImpl {
+            auction,
+            interest,
+            results,
+        }
     }
 }
 
@@ -36,16 +56,20 @@ impl SearcherService for SearcherServiceImpl {
 
     async fn subscribe_bundle_results(
         &self,
-        _request: Request<SubscribeBundleResultsRequest>,
+        request: Request<SubscribeBundleResultsRequest>,
     ) -> Result<Response<Self::SubscribeBundleResultsStream>, Status> {
-        // TODO: stream landed/dropped results once the auction tracks outcomes.
-        unimplemented!()
+        let owner = owner_of(&request);
+        info!("searcher {owner} subscribed to bundle results");
+        let (sender, receiver) = channel(256);
+        self.results.add_subscriber(&owner, sender);
+        Ok(Response::new(ReceiverStream::new(receiver)))
     }
 
     async fn send_bundle(
         &self,
         request: Request<SendBundleRequest>,
     ) -> Result<Response<SendBundleResponse>, Status> {
+        let owner = owner_of(&request);
         let uuid = Uuid::new_v4().to_string();
         let bundle_uuid = BundleUuid {
             bundle: request.into_inner().bundle,
@@ -54,9 +78,10 @@ impl SearcherService for SearcherServiceImpl {
 
         info!("received bundle_uuid: {:?}", bundle_uuid.uuid);
 
-        // Record the bundle's writable accounts / programs so the relayer knows
-        // what flow to forward, then hand it to the auction.
+        // Associate the bundle with its searcher (for result routing), record
+        // its writable accounts/programs for the relayer, then run the auction.
         if bundle_uuid.bundle.is_some() {
+            self.results.register(&uuid, &owner);
             self.interest.observe_bundle(&bundle_uuid);
             self.auction.submit(bundle_uuid);
         }

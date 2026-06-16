@@ -2128,6 +2128,7 @@ dependencies = [
  "bincode",
  "jito-metrics",
  "jito-protos",
+ "jito-results",
  "log",
  "solana-sdk",
 ]
@@ -2164,6 +2165,7 @@ dependencies = [
  "jito-metrics",
  "jito-protos",
  "jito-relayer-service",
+ "jito-results",
  "jito-searcher",
  "jito-simulator",
  "jito-validator",
@@ -2223,12 +2225,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "jito-results"
+version = "0.1.0"
+dependencies = [
+ "jito-protos",
+ "tokio",
+ "tonic",
+]
+
+[[package]]
 name = "jito-searcher"
 version = "0.1.0"
 dependencies = [
  "jito-auction",
+ "jito-auth",
  "jito-interest",
  "jito-protos",
+ "jito-results",
  "log",
  "prost-types",
  "tokio",

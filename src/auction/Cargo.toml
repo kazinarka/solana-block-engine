@@ -11,6 +11,7 @@ path = "src/lib.rs"
 [dependencies]
 jito-protos = { path = "../jito_protos" }
 jito-metrics = { path = "../metrics" }
+jito-results = { path = "../results" }
 bincode = "1.3"
 log = { workspace = true }
 solana-sdk = "2"

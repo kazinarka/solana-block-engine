@@ -10,6 +10,7 @@ jito-auth = { path = "../auth" }
 jito-interest = { path = "../interest" }
 jito-leader-tracker = { path = "../leader_tracker" }
 jito-metrics = { path = "../metrics" }
+jito-results = { path = "../results" }
 jito-simulator = { path = "../simulator" }
 jito-protos = { path = "../jito_protos" }
 jito-relayer-service = { path = "../relayer" }

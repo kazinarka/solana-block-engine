@@ -7,7 +7,9 @@ publish = false
 [dependencies]
 jito-protos = { path = "../jito_protos" }
 jito-auction = { path = "../auction" }
+jito-auth = { path = "../auth" }
 jito-interest = { path = "../interest" }
+jito-results = { path = "../results" }
 log = { workspace = true }
 prost-types = { workspace = true }
 tokio = { workspace = true }
