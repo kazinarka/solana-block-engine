@@ -9,8 +9,8 @@ use jito_protos::packet::{Meta, Packet};
 use solana_sdk::hash::Hash;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signer};
-use solana_sdk::system_transaction;
 use solana_sdk::transaction::VersionedTransaction;
+use solana_system_transaction as system_transaction;
 
 /// The System Program id in base58 (all-1s).
 const SYSTEM_PROGRAM: &str = "11111111111111111111111111111111";

@@ -24,9 +24,9 @@ use jito_results::BundleResults;
 use jito_protos::packet::Packet;
 use log::{debug, info};
 use solana_sdk::pubkey::Pubkey;
-use solana_sdk::system_instruction::SystemInstruction;
-use solana_sdk::system_program;
 use solana_sdk::transaction::VersionedTransaction;
+use solana_system_interface::instruction::SystemInstruction;
+use solana_system_interface::program as system_program;
 
 /// Rough per-transaction compute-unit estimate, used for bundles that haven't
 /// been simulated yet (or when no simulator is configured).

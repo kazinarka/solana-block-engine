@@ -14,5 +14,6 @@ prost = { workspace = true }
 prost-types = { workspace = true }
 solana-sdk = "2"
 solana-client = "2"
+solana-system-transaction = "2"
 tokio = { workspace = true }
 tonic = { workspace = true }

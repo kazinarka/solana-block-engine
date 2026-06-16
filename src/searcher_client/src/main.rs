@@ -21,9 +21,9 @@ use solana_sdk::{
     commitment_config::{CommitmentConfig, CommitmentLevel},
     pubkey::Pubkey,
     signature::{read_keypair_file, Keypair, Signer},
-    system_transaction,
     transaction::VersionedTransaction,
 };
+use solana_system_transaction as system_transaction;
 use tokio::runtime::Builder;
 use tokio::time::sleep;
 use tonic::metadata::MetadataValue;

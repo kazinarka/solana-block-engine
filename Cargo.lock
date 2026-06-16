@@ -2168,6 +2168,8 @@ dependencies = [
  "jito-results",
  "log",
  "solana-sdk",
+ "solana-system-interface",
+ "solana-system-transaction",
 ]
 
 [[package]]
@@ -2219,6 +2221,7 @@ dependencies = [
  "jito-protos",
  "log",
  "solana-sdk",
+ "solana-system-transaction",
 ]
 
 [[package]]
@@ -2300,6 +2303,7 @@ dependencies = [
  "prost-types",
  "solana-client",
  "solana-sdk",
+ "solana-system-transaction",
  "tokio",
  "tonic",
 ]
