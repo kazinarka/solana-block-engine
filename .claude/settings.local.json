@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(rustc --version)",
+      "Bash(protoc --version)",
+      "Bash(exit 1)",
+      "Bash(cp _ref_protos/*.proto src/jito_protos/protos/)",
+      "Bash(rm -f _ref_block_engine/.gitmodules _ref_block_engine/Cargo.lock)",
+      "Bash(RUST_LOG=info timeout 3 ./target/debug/jito-block-engine)"
+    ]
+  }
+}

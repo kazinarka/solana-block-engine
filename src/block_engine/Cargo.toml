@@ -1,0 +1,17 @@
+[package]
+name = "jito-block-engine"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+jito-auth = { path = "../auth" }
+jito-protos = { path = "../jito_protos" }
+jito-relayer-service = { path = "../relayer" }
+jito-searcher = { path = "../searcher" }
+jito-validator = { path = "../validator" }
+clap = { workspace = true }
+env_logger = { workspace = true }
+log = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }

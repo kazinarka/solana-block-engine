@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = [
+    "src/jito_protos",
+    "src/auth",
+    "src/validator",
+    "src/relayer",
+    "src/searcher",
+    "src/block_engine",
+]
+# The searcher_client (test "bundle blaster") still pins 2022-era solana-client
+# 1.14 and won't build on a modern toolchain. Excluded until it's ported to
+# Agave 2.x — see task list / README "Next steps".
+exclude = [
+    "src/searcher_client",
+]
+
+# Shared dependency versions for the whole workspace. Bumping here keeps every
+# crate on the same gRPC dialect, which matters because a 2026 Agave/jito-solana
+# validator will reject the 2022-era tonic 0.5 wire format the reference shipped.
+[workspace.dependencies]
+tonic = "0.12"
+prost = "0.13"
+prost-types = "0.13"
+tonic-build = "0.12"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+log = "0.4"
+env_logger = "0.11"
+clap = { version = "4", features = ["derive", "env"] }
+uuid = { version = "1", features = ["v4"] }

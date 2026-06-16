@@ -1,0 +1,16 @@
+[package]
+name = "jito-relayer-service"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "jito_relayer_service"
+path = "src/lib.rs"
+
+[dependencies]
+jito-protos = { path = "../jito_protos" }
+tonic = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+log = { workspace = true }
