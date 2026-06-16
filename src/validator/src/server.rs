@@ -1,3 +1,5 @@
+use jito_auth::token::Claims;
+use jito_leader_tracker::LeaderTracker;
 use jito_protos::packet::PacketBatch;
 use jito_protos::{
     block_engine::{
@@ -19,20 +21,46 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
-pub struct AuthInterceptor {}
+/// A subscribing validator stream, tagged with the validator's identity (its
+/// base58 pubkey, taken from the auth token) so we can route by leader schedule.
+struct Subscription<T> {
+    identity: String,
+    sender: Sender<Result<T, Status>>,
+}
+
+type PacketSubs = Arc<Mutex<HashMap<Uuid, Subscription<SubscribePacketsResponse>>>>;
+type BundleSubs = Arc<Mutex<HashMap<Uuid, Subscription<SubscribeBundlesResponse>>>>;
 
 pub struct ValidatorServerImpl {
     forwarder_thread: JoinHandle<()>,
-    packet_subscriptions:
-        Arc<Mutex<HashMap<Uuid, Sender<Result<SubscribePacketsResponse, Status>>>>>,
-    bundle_subscriptions:
-        Arc<Mutex<HashMap<Uuid, Sender<Result<SubscribeBundlesResponse, Status>>>>>,
+    packet_subscriptions: PacketSubs,
+    bundle_subscriptions: BundleSubs,
+}
+
+/// Should this subscriber receive traffic right now? Yes if no leader tracker is
+/// configured, otherwise only if its identity is an upcoming leader.
+fn should_forward(tracker: &Option<Arc<LeaderTracker>>, identity: &str) -> bool {
+    match tracker {
+        Some(t) => t.is_upcoming_leader(identity),
+        None => true,
+    }
+}
+
+/// Pull the authenticated identity (base58 pubkey) out of the request, as set by
+/// the auth interceptor. Empty if missing (which, with auth enabled, shouldn't
+/// happen — such a stream simply never matches a leader).
+fn identity_of<T>(req: &Request<T>) -> String {
+    req.extensions()
+        .get::<Claims>()
+        .map(|c| c.sub.clone())
+        .unwrap_or_default()
 }
 
 impl ValidatorServerImpl {
     pub fn new(
         bundle_receiver: Receiver<BundleUuid>,
         packet_receiver: Receiver<PacketBatch>,
+        leader_tracker: Option<Arc<LeaderTracker>>,
     ) -> Self {
         let packet_subscriptions = Arc::new(Mutex::new(HashMap::default()));
         let bundle_subscriptions = Arc::new(Mutex::new(HashMap::default()));
@@ -41,6 +69,7 @@ impl ValidatorServerImpl {
             packet_receiver,
             &packet_subscriptions,
             &bundle_subscriptions,
+            leader_tracker,
         );
         Self {
             forwarder_thread,
@@ -56,12 +85,9 @@ impl ValidatorServerImpl {
     fn start_forwarder_thread(
         mut bundle_receiver: Receiver<BundleUuid>,
         mut packet_receiver: Receiver<PacketBatch>,
-        packet_subscriptions: &Arc<
-            Mutex<HashMap<Uuid, Sender<Result<SubscribePacketsResponse, Status>>>>,
-        >,
-        bundle_subscriptions: &Arc<
-            Mutex<HashMap<Uuid, Sender<Result<SubscribeBundlesResponse, Status>>>>,
-        >,
+        packet_subscriptions: &PacketSubs,
+        bundle_subscriptions: &BundleSubs,
+        leader_tracker: Option<Arc<LeaderTracker>>,
     ) -> JoinHandle<()> {
         let packet_subscriptions = packet_subscriptions.clone();
         let bundle_subscriptions = bundle_subscriptions.clone();
@@ -77,7 +103,7 @@ impl ValidatorServerImpl {
                         tokio::select! {
                             maybe_packet_batch = packet_receiver.recv() => {
                                 if let Some(packet_batch) = maybe_packet_batch {
-                                    let failed_sends = Self::forward_packets(packet_batch, &packet_subscriptions).await;
+                                    let failed_sends = Self::forward_packets(packet_batch, &packet_subscriptions, &leader_tracker).await;
                                     for uuid in failed_sends {
                                         info!("removing packet_subscriptions uuid: {:?}", uuid);
                                         packet_subscriptions.lock().unwrap().remove(&uuid);
@@ -89,7 +115,7 @@ impl ValidatorServerImpl {
                             }
                             maybe_bundle = bundle_receiver.recv() => {
                                 if let Some(bundle) = maybe_bundle {
-                                    let failed_sends = Self::forward_bundle(bundle, &bundle_subscriptions).await;
+                                    let failed_sends = Self::forward_bundle(bundle, &bundle_subscriptions, &leader_tracker).await;
                                     for uuid in failed_sends {
                                         info!("removing bundle_subscriptions uuid: {:?}", uuid);
                                         bundle_subscriptions.lock().unwrap().remove(&uuid);
@@ -108,14 +134,16 @@ impl ValidatorServerImpl {
 
     async fn forward_packets(
         packet_batch: PacketBatch,
-        packet_subscriptions: &Arc<
-            Mutex<HashMap<Uuid, Sender<Result<SubscribePacketsResponse, Status>>>>,
-        >,
+        packet_subscriptions: &PacketSubs,
+        leader_tracker: &Option<Arc<LeaderTracker>>,
     ) -> Vec<Uuid> {
         let mut failed_sends = Vec::new();
         let subs = packet_subscriptions.lock().unwrap();
-        for (uuid, sender) in subs.iter() {
-            match sender.try_send(Ok(SubscribePacketsResponse {
+        for (uuid, sub) in subs.iter() {
+            if !should_forward(leader_tracker, &sub.identity) {
+                continue;
+            }
+            match sub.sender.try_send(Ok(SubscribePacketsResponse {
                 header: None,
                 batch: Some(packet_batch.clone()),
             })) {
@@ -133,18 +161,20 @@ impl ValidatorServerImpl {
 
     async fn forward_bundle(
         bundle: BundleUuid,
-        bundle_subscriptions: &Arc<
-            Mutex<HashMap<Uuid, Sender<Result<SubscribeBundlesResponse, Status>>>>,
-        >,
+        bundle_subscriptions: &BundleSubs,
+        leader_tracker: &Option<Arc<LeaderTracker>>,
     ) -> Vec<Uuid> {
         let mut failed_sends = Vec::new();
         let subs = bundle_subscriptions.lock().unwrap();
-        for (uuid, sender) in subs.iter() {
-            match sender.try_send(Ok(SubscribeBundlesResponse {
+        for (uuid, sub) in subs.iter() {
+            if !should_forward(leader_tracker, &sub.identity) {
+                continue;
+            }
+            match sub.sender.try_send(Ok(SubscribeBundlesResponse {
                 bundles: vec![bundle.clone()],
             })) {
                 Ok(_) => {
-                    info!("bundle forwarded validator uuid: {:?}", uuid);
+                    info!("bundle forwarded to validator uuid: {:?}", uuid);
                 }
                 Err(TrySendError::Closed(_)) => {
                     warn!("bundle channel closed validator uuid: {:?}", uuid);
@@ -165,18 +195,17 @@ impl BlockEngineValidator for ValidatorServerImpl {
 
     async fn subscribe_packets(
         &self,
-        _request: Request<SubscribePacketsRequest>,
+        request: Request<SubscribePacketsRequest>,
     ) -> Result<Response<Self::SubscribePacketsStream>, Status> {
+        let identity = identity_of(&request);
         let (sender, receiver) = channel(1000);
-
         let uuid = Uuid::new_v4();
 
-        info!("adding packet_subscriptions uuid: {:?}", uuid);
-
+        info!("adding packet subscription uuid={uuid:?} identity={identity}");
         self.packet_subscriptions
             .lock()
             .unwrap()
-            .insert(uuid, sender);
+            .insert(uuid, Subscription { identity, sender });
 
         Ok(Response::new(ReceiverStream::new(receiver)))
     }
@@ -185,18 +214,17 @@ impl BlockEngineValidator for ValidatorServerImpl {
 
     async fn subscribe_bundles(
         &self,
-        _request: Request<SubscribeBundlesRequest>,
+        request: Request<SubscribeBundlesRequest>,
     ) -> Result<Response<Self::SubscribeBundlesStream>, Status> {
+        let identity = identity_of(&request);
         let (sender, receiver) = channel(1000);
-
         let uuid = Uuid::new_v4();
 
-        info!("adding bundle_subscriptions uuid: {:?}", uuid);
-
+        info!("adding bundle subscription uuid={uuid:?} identity={identity}");
         self.bundle_subscriptions
             .lock()
             .unwrap()
-            .insert(uuid, sender);
+            .insert(uuid, Subscription { identity, sender });
 
         Ok(Response::new(ReceiverStream::new(receiver)))
     }

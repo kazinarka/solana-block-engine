@@ -1,0 +1,15 @@
+[package]
+name = "jito-leader-tracker"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "jito_leader_tracker"
+path = "src/lib.rs"
+
+[dependencies]
+log = { workspace = true }
+tokio = { workspace = true }
+solana-client = "2"
+solana-sdk = "2"

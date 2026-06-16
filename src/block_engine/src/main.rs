@@ -10,6 +10,7 @@ use jito_protos::auth::auth_service_server::AuthServiceServer;
 use jito_protos::block_engine::block_engine_relayer_server::BlockEngineRelayerServer;
 use jito_protos::block_engine::block_engine_validator_server::BlockEngineValidatorServer;
 use jito_protos::searcher::searcher_service_server::SearcherServiceServer;
+use jito_leader_tracker::LeaderTracker;
 use jito_relayer_service::server::RelayerServerImpl;
 use jito_searcher::server::SearcherServiceImpl;
 use jito_validator::server::ValidatorServerImpl;
@@ -46,6 +47,17 @@ struct Args {
     /// pubkey may connect (logged as a warning — set this in production).
     #[clap(long, env = "ALLOWED_PUBKEYS", value_delimiter = ',')]
     allowed_pubkeys: Vec<String>,
+
+    /// Solana RPC url used to track the leader schedule. If unset, packets and
+    /// bundles are forwarded to ALL connected validators (fine for local
+    /// testing; set it in production for leader-targeted routing).
+    #[clap(long, env = "LEADER_RPC_URL")]
+    leader_rpc_url: Option<String>,
+
+    /// How many slots ahead of the current slot a validator counts as the
+    /// upcoming leader (so traffic arrives before its slot begins).
+    #[clap(long, env, default_value_t = 2)]
+    leader_lookahead_slots: u64,
 }
 
 fn main() {
@@ -78,6 +90,18 @@ fn main() {
     let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
     runtime.block_on(async move {
         spawn_challenge_pruner(auth_state.clone());
+
+        // Leader-schedule tracker for routing. None => forward to all.
+        let leader_tracker = match args.leader_rpc_url {
+            Some(url) => {
+                info!("leader-targeted routing enabled via RPC {url}");
+                Some(LeaderTracker::start(url, args.leader_lookahead_slots))
+            }
+            None => {
+                warn!("LEADER_RPC_URL not set; forwarding to ALL validators (no leader routing)");
+                None
+            }
+        };
 
         // start searcher server (token-protected)
         {
@@ -129,7 +153,8 @@ fn main() {
 
         // start validator server (token-protected)
         let interceptor = AuthInterceptor::new(auth_state.clone());
-        let validator_impl = ValidatorServerImpl::new(bundle_receiver, packet_receiver);
+        let validator_impl =
+            ValidatorServerImpl::new(bundle_receiver, packet_receiver, leader_tracker);
         let validator_svc =
             BlockEngineValidatorServer::with_interceptor(validator_impl, interceptor);
         info!("starting validator server at {}", args.validator_addr);

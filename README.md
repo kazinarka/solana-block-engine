@@ -31,7 +31,8 @@ Two channels stitch the services together (see `src/block_engine/src/main.rs`):
 |-------|------|--------|
 | `jito_protos` | Generated gRPC bindings (vendored mev-protos) | ✅ modernized, builds |
 | `relayer` | `BlockEngineRelayer` service — ingests packets from the relayer | ✅ **new** (reference never built this) |
-| `validator` | `BlockEngineValidator` service — fans packets+bundles to validators | ✅ builds |
+| `validator` | `BlockEngineValidator` service — routes packets+bundles to the leading validator | ✅ leader-aware |
+| `leader_tracker` | polls RPC for the leader schedule; answers "is X leading soon?" | ✅ new |
 | `searcher` | `SearcherService` — accepts bundles | ⚠️ `send_bundle` works; rest `unimplemented!()` |
 | `auth` | `AuthService` — ed25519 challenge/response + HS256 JWT, interceptor, pubkey allowlist | ✅ real, tested |
 | `block_engine` | binary wiring all services together | ✅ builds |
@@ -59,8 +60,10 @@ This is a wiring skeleton. The MEV "brain" is intentionally absent:
    highest-tip combination that fits the block CU limit.
 3. **Bundle simulation** — replay bundles against a Solana bank (SVM) to verify
    success and compute actual tip value.
-4. **Leader-aware routing** — currently fans out to *all* connected validators.
-   Should track the leader schedule and target the current/upcoming leader.
+4. ~~**Leader-aware routing**~~ ✅ done — `leader_tracker` polls RPC for the
+   schedule; the validator service tags each subscription with the validator's
+   authenticated identity and forwards only to upcoming leaders. Enable with
+   `--leader-rpc-url`; without it, traffic fans out to all (local testing).
 5. **Accounts/Programs of Interest** — `src/relayer/src/server.rs` hard-codes
    `"*"` (forward everything). Should be derived from submitted bundles so the
    relayer only forwards transactions touching contended state.

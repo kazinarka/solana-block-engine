@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "src/jito_protos",
     "src/auth",
+    "src/leader_tracker",
     "src/validator",
     "src/relayer",
     "src/searcher",

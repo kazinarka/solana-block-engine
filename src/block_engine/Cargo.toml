@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 jito-auth = { path = "../auth" }
+jito-leader-tracker = { path = "../leader_tracker" }
 jito-protos = { path = "../jito_protos" }
 jito-relayer-service = { path = "../relayer" }
 jito-searcher = { path = "../searcher" }
