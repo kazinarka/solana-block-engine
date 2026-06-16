@@ -4,9 +4,9 @@ use jito_protos::packet::PacketBatch;
 use jito_protos::{
     block_engine::{
         block_engine_validator_server::BlockEngineValidator, BlockBuilderFeeInfoRequest,
-        BlockBuilderFeeInfoResponse, GetBlockEngineEndpointRequest, GetBlockEngineEndpointResponse,
-        SubscribeBundlesRequest, SubscribeBundlesResponse, SubscribePacketsRequest,
-        SubscribePacketsResponse,
+        BlockBuilderFeeInfoResponse, BlockEngineEndpoint, GetBlockEngineEndpointRequest,
+        GetBlockEngineEndpointResponse, SubscribeBundlesRequest, SubscribeBundlesResponse,
+        SubscribePacketsRequest, SubscribePacketsResponse,
     },
     bundle::BundleUuid,
 };
@@ -45,6 +45,10 @@ pub struct ValidatorServerImpl {
     block_builder_pubkey: String,
     /// Block-builder commission (0-100).
     block_builder_commission: u64,
+    /// Global endpoint advertised to clients for region discovery.
+    global_endpoint: Option<BlockEngineEndpoint>,
+    /// Regioned endpoints advertised to clients.
+    regioned_endpoints: Vec<BlockEngineEndpoint>,
 }
 
 /// Should this subscriber receive traffic right now? Yes if no leader tracker is
@@ -73,6 +77,8 @@ impl ValidatorServerImpl {
         leader_tracker: Option<Arc<LeaderTracker>>,
         block_builder_pubkey: String,
         block_builder_commission: u64,
+        global_endpoint: Option<BlockEngineEndpoint>,
+        regioned_endpoints: Vec<BlockEngineEndpoint>,
     ) -> Self {
         let packet_subscriptions = Arc::new(Mutex::new(HashMap::default()));
         let bundle_subscriptions = Arc::new(Mutex::new(HashMap::default()));
@@ -89,6 +95,8 @@ impl ValidatorServerImpl {
             bundle_subscriptions,
             block_builder_pubkey,
             block_builder_commission,
+            global_endpoint,
+            regioned_endpoints,
         }
     }
 
@@ -269,11 +277,11 @@ impl BlockEngineValidator for ValidatorServerImpl {
         &self,
         _request: Request<GetBlockEngineEndpointRequest>,
     ) -> Result<Response<GetBlockEngineEndpointResponse>, Status> {
-        // Endpoint discovery: a multi-region deployment would advertise its
-        // global + regioned URLs here. Single-node skeleton returns none.
+        // Endpoint discovery: advertise the configured global + regioned URLs so
+        // clients can pick the closest region.
         Ok(Response::new(GetBlockEngineEndpointResponse {
-            global_endpoint: None,
-            regioned_endpoints: vec![],
+            global_endpoint: self.global_endpoint.clone(),
+            regioned_endpoints: self.regioned_endpoints.clone(),
         }))
     }
 }

@@ -12,6 +12,7 @@ use jito_auth::token::AuthState;
 use jito_interest::InterestRegistry;
 use jito_protos::auth::auth_service_server::AuthServiceServer;
 use jito_protos::auth::Role;
+use jito_protos::block_engine::BlockEngineEndpoint;
 use jito_protos::block_engine::block_engine_relayer_server::BlockEngineRelayerServer;
 use jito_protos::block_engine::block_engine_validator_server::BlockEngineValidatorServer;
 use jito_protos::searcher::searcher_service_server::SearcherServiceServer;
@@ -117,6 +118,30 @@ struct Args {
     /// Address to serve the Prometheus metrics endpoint (GET /metrics).
     #[clap(long, env, default_value = "0.0.0.0:9900")]
     metrics_addr: SocketAddr,
+
+    /// Public URL of this block engine, advertised as the global endpoint via
+    /// GetBlockEngineEndpoints (e.g. https://be.example.com). Unset => no global.
+    #[clap(long, env)]
+    block_engine_url: Option<String>,
+
+    /// Shredstream receiver address advertised with the global endpoint.
+    #[clap(long, env, default_value = "")]
+    shredstream_addr: String,
+
+    /// Regioned endpoints to advertise, each as "url|shredstream_addr"
+    /// (comma-separated). Example: "https://ny.be:443|ny.shred:1002".
+    #[clap(long, env, value_delimiter = ',')]
+    regioned_endpoint: Vec<String>,
+}
+
+/// Parse a "url|shredstream_addr" spec into a BlockEngineEndpoint (the
+/// shredstream half is optional).
+fn parse_endpoint(spec: &str) -> BlockEngineEndpoint {
+    let (url, shred) = spec.split_once('|').unwrap_or((spec, ""));
+    BlockEngineEndpoint {
+        block_engine_url: url.trim().to_string(),
+        shredstream_receiver_address: shred.trim().to_string(),
+    }
 }
 
 /// Resolves once the shutdown signal fires; passed to each server's
@@ -356,12 +381,24 @@ fn main() {
 
         // start validator server (token-protected)
         let interceptor = AuthInterceptor::for_role(auth_state.clone(), Role::Validator as i32);
+        let global_endpoint = args.block_engine_url.map(|url| BlockEngineEndpoint {
+            block_engine_url: url,
+            shredstream_receiver_address: args.shredstream_addr,
+        });
+        let regioned_endpoints: Vec<BlockEngineEndpoint> = args
+            .regioned_endpoint
+            .iter()
+            .map(|s| parse_endpoint(s))
+            .collect();
+
         let validator_impl = ValidatorServerImpl::new(
             bundle_receiver,
             packet_receiver,
             leader_tracker,
             args.block_builder_pubkey,
             args.block_builder_commission,
+            global_endpoint,
+            regioned_endpoints,
         );
         let validator_svc =
             BlockEngineValidatorServer::with_interceptor(validator_impl, interceptor);
