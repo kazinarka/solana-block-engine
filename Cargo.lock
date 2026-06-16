@@ -2148,6 +2148,7 @@ dependencies = [
  "env_logger 0.11.10",
  "jito-auction",
  "jito-auth",
+ "jito-interest",
  "jito-leader-tracker",
  "jito-protos",
  "jito-relayer-service",
@@ -2157,6 +2158,16 @@ dependencies = [
  "log",
  "tokio",
  "tonic",
+]
+
+[[package]]
+name = "jito-interest"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "jito-protos",
+ "log",
+ "solana-sdk",
 ]
 
 [[package]]
@@ -2183,6 +2194,7 @@ dependencies = [
 name = "jito-relayer-service"
 version = "0.1.0"
 dependencies = [
+ "jito-interest",
  "jito-protos",
  "log",
  "tokio",
@@ -2195,6 +2207,7 @@ name = "jito-searcher"
 version = "0.1.0"
 dependencies = [
  "jito-auction",
+ "jito-interest",
  "jito-protos",
  "log",
  "prost-types",

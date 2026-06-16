@@ -21,8 +21,10 @@
 //!   * Expiry (`expiry_ms`) is ignored — a real engine must drop/forward a batch
 //!     before the relayer's ~200ms hold elapses.
 
+use std::sync::Arc;
 use std::time::Duration;
 
+use jito_interest::InterestRegistry;
 use jito_protos::block_engine::{
     block_engine_relayer_server::BlockEngineRelayer, packet_batch_update::Msg,
     AccountsOfInterestRequest, AccountsOfInterestUpdate, PacketBatchUpdate,
@@ -44,11 +46,23 @@ pub struct RelayerServerImpl {
     /// forwarder. This is the `packet_sender` half that `main.rs` previously
     /// left unused (`_packet_sender`).
     packet_sender: Sender<PacketBatch>,
+    /// Source of accounts/programs of interest, derived from submitted bundles.
+    interest: Arc<InterestRegistry>,
+    /// If true, advertise `"*"` (forward everything) instead of the derived set.
+    forward_all: bool,
 }
 
 impl RelayerServerImpl {
-    pub fn new(packet_sender: Sender<PacketBatch>) -> Self {
-        Self { packet_sender }
+    pub fn new(
+        packet_sender: Sender<PacketBatch>,
+        interest: Arc<InterestRegistry>,
+        forward_all: bool,
+    ) -> Self {
+        Self {
+            packet_sender,
+            interest,
+            forward_all,
+        }
     }
 }
 
@@ -57,22 +71,30 @@ impl BlockEngineRelayer for RelayerServerImpl {
     type SubscribeAccountsOfInterestStream =
         ReceiverStream<Result<AccountsOfInterestUpdate, Status>>;
 
-    /// Tell the relayer which accounts we want transactions for. Skeleton sends
-    /// "*" (all accounts) on an interval so the relayer forwards everything.
+    /// Tell the relayer which accounts we want transactions for: the writable
+    /// accounts referenced by submitted bundles (or "*" if `forward_all`).
     async fn subscribe_accounts_of_interest(
         &self,
         _request: Request<AccountsOfInterestRequest>,
     ) -> Result<Response<Self::SubscribeAccountsOfInterestStream>, Status> {
         info!("relayer subscribed to accounts of interest");
         let (sender, receiver) = channel(16);
+        let interest = self.interest.clone();
+        let forward_all = self.forward_all;
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(UPDATE_INTERVAL);
             loop {
                 interval.tick().await;
-                let update = AccountsOfInterestUpdate {
-                    accounts: vec!["*".to_string()],
+                let accounts = if forward_all {
+                    vec!["*".to_string()]
+                } else {
+                    interest.accounts_of_interest()
                 };
-                if sender.send(Ok(update)).await.is_err() {
+                if sender
+                    .send(Ok(AccountsOfInterestUpdate { accounts }))
+                    .await
+                    .is_err()
+                {
                     warn!("relayer AOI stream closed");
                     break;
                 }
@@ -90,14 +112,22 @@ impl BlockEngineRelayer for RelayerServerImpl {
     ) -> Result<Response<Self::SubscribeProgramsOfInterestStream>, Status> {
         info!("relayer subscribed to programs of interest");
         let (sender, receiver) = channel(16);
+        let interest = self.interest.clone();
+        let forward_all = self.forward_all;
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(UPDATE_INTERVAL);
             loop {
                 interval.tick().await;
-                let update = ProgramsOfInterestUpdate {
-                    programs: vec!["*".to_string()],
+                let programs = if forward_all {
+                    vec!["*".to_string()]
+                } else {
+                    interest.programs_of_interest()
                 };
-                if sender.send(Ok(update)).await.is_err() {
+                if sender
+                    .send(Ok(ProgramsOfInterestUpdate { programs }))
+                    .await
+                    .is_err()
+                {
                     warn!("relayer POI stream closed");
                     break;
                 }

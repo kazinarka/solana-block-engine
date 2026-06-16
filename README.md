@@ -30,7 +30,8 @@ Two channels stitch the services together (see `src/block_engine/src/main.rs`):
 | Crate | Role | Status |
 |-------|------|--------|
 | `jito_protos` | Generated gRPC bindings (vendored mev-protos) | ✅ modernized, builds |
-| `relayer` | `BlockEngineRelayer` service — ingests packets from the relayer | ✅ **new** (reference never built this) |
+| `relayer` | `BlockEngineRelayer` service — ingests packets; streams derived AOI/POI | ✅ **new** (reference never built this) |
+| `interest` | derives accounts/programs of interest from submitted bundles | ✅ new |
 | `validator` | `BlockEngineValidator` service — routes packets+bundles to the leading validator | ✅ leader-aware |
 | `leader_tracker` | polls RPC for the leader schedule; answers "is X leading soon?" | ✅ new |
 | `searcher` | `SearcherService` — accepts bundles into the auction | ⚠️ `send_bundle` works; rest `unimplemented!()` |
@@ -69,9 +70,10 @@ This is a wiring skeleton. The MEV "brain" is intentionally absent:
    schedule; the validator service tags each subscription with the validator's
    authenticated identity and forwards only to upcoming leaders. Enable with
    `--leader-rpc-url`; without it, traffic fans out to all (local testing).
-5. **Accounts/Programs of Interest** — `src/relayer/src/server.rs` hard-codes
-   `"*"` (forward everything). Should be derived from submitted bundles so the
-   relayer only forwards transactions touching contended state.
+5. ~~**Accounts/Programs of Interest**~~ ✅ done — the `interest` registry
+   derives writable accounts + invoked programs from submitted bundles, and the
+   relayer service streams them (use `--forward-all-packets` for the old "*"
+   behaviour).
 6. **Expiry handling** — `expiry_ms` on incoming packet batches is ignored.
 
 ## Testing end-to-end

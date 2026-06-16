@@ -10,6 +10,7 @@ path = "src/lib.rs"
 
 [dependencies]
 jito-protos = { path = "../jito_protos" }
+jito-interest = { path = "../interest" }
 tonic = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }

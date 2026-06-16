@@ -5,6 +5,7 @@ members = [
     "src/auth",
     "src/auction",
     "src/simulator",
+    "src/interest",
     "src/leader_tracker",
     "src/validator",
     "src/relayer",

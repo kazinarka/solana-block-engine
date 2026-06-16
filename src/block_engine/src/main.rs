@@ -9,6 +9,7 @@ use jito_auction::Auction;
 use jito_auth::interceptor::AuthInterceptor;
 use jito_auth::server::{random_secret, spawn_challenge_pruner, AuthServiceImpl};
 use jito_auth::token::AuthState;
+use jito_interest::InterestRegistry;
 use jito_protos::auth::auth_service_server::AuthServiceServer;
 use jito_protos::block_engine::block_engine_relayer_server::BlockEngineRelayerServer;
 use jito_protos::block_engine::block_engine_validator_server::BlockEngineValidatorServer;
@@ -85,6 +86,16 @@ struct Args {
     /// dropped for failing. Can be the same RPC as --leader-rpc-url.
     #[clap(long, env = "SIM_RPC_URL")]
     sim_rpc_url: Option<String>,
+
+    /// Forward ALL packets from the relayer (advertise "*") instead of only the
+    /// accounts/programs of interest derived from submitted bundles.
+    #[clap(long, env = "FORWARD_ALL_PACKETS")]
+    forward_all_packets: bool,
+
+    /// How long (ms) a writable account / program stays "of interest" after the
+    /// bundle that referenced it was submitted.
+    #[clap(long, env, default_value_t = 2_000)]
+    interest_ttl_ms: u64,
 }
 
 fn main() {
@@ -129,6 +140,22 @@ fn main() {
                 None
             }
         };
+
+        // Registry of accounts/programs of interest derived from submitted
+        // bundles; the relayer service streams these to the relayer.
+        let interest = Arc::new(InterestRegistry::new(Duration::from_millis(
+            args.interest_ttl_ms,
+        )));
+        {
+            let interest = interest.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(1));
+                loop {
+                    interval.tick().await;
+                    interest.prune();
+                }
+            });
+        }
 
         // The auction buffers bundles from searchers and, on each tick, emits the
         // winning set to the validator via `bundle_sender`.
@@ -181,8 +208,9 @@ fn main() {
         {
             let interceptor = AuthInterceptor::new(auth_state.clone());
             let auction = auction.clone();
+            let interest = interest.clone();
             tokio::spawn(async move {
-                let searcher_service_impl = SearcherServiceImpl::new(auction);
+                let searcher_service_impl = SearcherServiceImpl::new(auction, interest);
                 let searcher_svc =
                     SearcherServiceServer::with_interceptor(searcher_service_impl, interceptor);
                 info!("starting searcher server at {}", args.searcher_addr);
@@ -198,8 +226,11 @@ fn main() {
         // relayer into the validator forwarder
         {
             let interceptor = AuthInterceptor::new(auth_state.clone());
+            let interest = interest.clone();
+            let forward_all = args.forward_all_packets;
             tokio::spawn(async move {
-                let relayer_service_impl = RelayerServerImpl::new(packet_sender);
+                let relayer_service_impl =
+                    RelayerServerImpl::new(packet_sender, interest, forward_all);
                 let relayer_svc =
                     BlockEngineRelayerServer::with_interceptor(relayer_service_impl, interceptor);
                 info!("starting relayer server at {}", args.relayer_addr);
