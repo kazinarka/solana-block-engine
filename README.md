@@ -37,6 +37,7 @@ Two channels stitch the services together (see `src/block_engine/src/main.rs`):
 | `searcher` | `SearcherService` — accepts bundles into the auction | ⚠️ `send_bundle` works; rest `unimplemented!()` |
 | `auction` | scores bundles by tip, packs winners under a CU budget | ✅ tip + real-CU/validity from simulation |
 | `simulator` | RPC-backed bundle simulation (real CU, drop failing bundles) | ✅ via `--sim-rpc-url` |
+| `metrics` | process-wide counters; periodic log snapshot + Prometheus render | ✅ new |
 | `auth` | `AuthService` — ed25519 challenge/response + HS256 JWT, interceptor, pubkey allowlist | ✅ real, tested |
 | `block_engine` | binary wiring all services together | ✅ builds |
 | `searcher_client` | test "bundle blaster" (authenticates, then streams bundles) | ✅ ported to Agave 2.x; not in default build |
@@ -81,6 +82,11 @@ This is a wiring skeleton. The MEV "brain" is intentionally absent:
 
 The block-builder fee info is now configurable too (`--block-builder-pubkey`,
 `--block-builder-commission`) instead of an all-1s placeholder.
+
+7. ~~**Observability & shutdown**~~ ✅ done — the `metrics` crate tracks
+   bundles received/won/dropped, packets received/forwarded/expired, and auth
+   challenges/success/failures, logged every 30s (and renderable in Prometheus
+   text format). The engine drains all servers cleanly on SIGINT/SIGTERM.
 
 ## Testing end-to-end
 

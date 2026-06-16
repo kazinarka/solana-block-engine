@@ -69,6 +69,7 @@ impl AuthService for AuthServiceImpl {
         }
 
         let challenge = self.state.create_challenge(&pubkey, inner.role);
+        jito_metrics::inc_auth_challenges();
         info!("issued auth challenge to {pubkey} (role={})", inner.role);
         Ok(Response::new(GenerateAuthChallengeResponse { challenge }))
     }
@@ -119,12 +120,16 @@ impl AuthService for AuthServiceImpl {
 
         verifying_key
             .verify(inner.challenge.as_bytes(), &signature)
-            .map_err(|_| Status::permission_denied("challenge signature verification failed"))?;
+            .map_err(|_| {
+                jito_metrics::inc_auth_failures();
+                Status::permission_denied("challenge signature verification failed")
+            })?;
 
         // Issue tokens carrying the role the client authenticated for; the
         // per-service interceptors enforce it.
         let (access, access_exp) = self.state.issue(&pubkey, role, false)?;
         let (refresh, refresh_exp) = self.state.issue(&pubkey, role, true)?;
+        jito_metrics::inc_auth_success();
         info!("authenticated {pubkey}; issued access + refresh tokens");
 
         Ok(Response::new(GenerateAuthTokensResponse {

@@ -120,8 +120,10 @@ impl ValidatorServerImpl {
                                     // Drop batches whose relayer-given window has elapsed.
                                     if matches!(deadline, Some(d) if Instant::now() > d) {
                                         debug!("dropping expired packet batch");
+                                        jito_metrics::inc_packets_expired();
                                         continue;
                                     }
+                                    jito_metrics::inc_packets_forwarded();
                                     let failed_sends = Self::forward_packets(packet_batch, &packet_subscriptions, &leader_tracker).await;
                                     for uuid in failed_sends {
                                         info!("removing packet_subscriptions uuid: {:?}", uuid);
@@ -221,6 +223,7 @@ impl BlockEngineValidator for ValidatorServerImpl {
         let uuid = Uuid::new_v4();
 
         info!("adding packet subscription uuid={uuid:?} identity={identity}");
+        jito_metrics::inc_validator_subscriptions();
         self.packet_subscriptions
             .lock()
             .unwrap()

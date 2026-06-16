@@ -161,6 +161,7 @@ impl BlockEngineRelayer for RelayerServerImpl {
                     Ok(Some(update)) => match update.msg {
                         Some(Msg::Batches(expiring)) => {
                             if let Some(batch) = expiring.batch {
+                                jito_metrics::inc_packets_received();
                                 // Translate the relayer's expiry window into an
                                 // engine-local deadline. 0 => no expiry.
                                 let deadline = if expiring.expiry_ms == 0 {

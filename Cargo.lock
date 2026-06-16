@@ -2118,6 +2118,7 @@ name = "jito-auction"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "jito-metrics",
  "jito-protos",
  "log",
  "solana-sdk",
@@ -2129,6 +2130,7 @@ version = "0.1.0"
 dependencies = [
  "bs58",
  "ed25519-dalek 2.2.0",
+ "jito-metrics",
  "jito-protos",
  "jsonwebtoken",
  "log",
@@ -2150,6 +2152,7 @@ dependencies = [
  "jito-auth",
  "jito-interest",
  "jito-leader-tracker",
+ "jito-metrics",
  "jito-protos",
  "jito-relayer-service",
  "jito-searcher",
@@ -2181,6 +2184,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "jito-metrics"
+version = "0.1.0"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "jito-protos"
 version = "0.1.0"
 dependencies = [
@@ -2195,6 +2205,7 @@ name = "jito-relayer-service"
 version = "0.1.0"
 dependencies = [
  "jito-interest",
+ "jito-metrics",
  "jito-protos",
  "log",
  "tokio",
@@ -2252,6 +2263,7 @@ version = "0.1.0"
 dependencies = [
  "jito-auth",
  "jito-leader-tracker",
+ "jito-metrics",
  "jito-protos",
  "log",
  "prost-types",

@@ -108,6 +108,7 @@ impl Auction {
             "auction: buffered bundle {} tip={} est_cu={}",
             bundle.uuid, tip_lamports, est_cu
         );
+        jito_metrics::inc_bundles_received();
         self.buffer.lock().unwrap().push(PendingBundle {
             bundle,
             tip_lamports,
@@ -193,6 +194,7 @@ impl Auction {
         if buf.is_empty() {
             return Vec::new();
         }
+        let entered = buf.len();
 
         let now = Instant::now();
         // Drop expired bundles and any that failed simulation (they'd fail
@@ -220,6 +222,8 @@ impl Auction {
             }
         }
 
+        jito_metrics::add_bundles_won(winners.len() as u64);
+        jito_metrics::add_bundles_dropped((entered - winners.len()) as u64);
         if !winners.is_empty() {
             info!(
                 "auction: {} winners, {} lamports tip, {} CU used",

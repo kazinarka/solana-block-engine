@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 jito-protos = { path = "../jito_protos" }
+jito-metrics = { path = "../metrics" }
 bs58 = "0.5"
 ed25519-dalek = "2"
 jsonwebtoken = "9"

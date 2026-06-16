@@ -108,6 +108,35 @@ struct Args {
     block_builder_commission: u64,
 }
 
+/// Resolves once the shutdown signal fires; passed to each server's
+/// `serve_with_shutdown` so they all drain on SIGTERM/SIGINT.
+async fn wait_shutdown(mut rx: tokio::sync::watch::Receiver<bool>) {
+    while !*rx.borrow() {
+        if rx.changed().await.is_err() {
+            break;
+        }
+    }
+}
+
+/// Sets the shutdown flag on the first SIGINT (Ctrl-C) or SIGTERM.
+async fn await_signal(tx: tokio::sync::watch::Sender<bool>) {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut term = signal(SignalKind::terminate()).expect("install SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = term.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+    info!("shutdown signal received; draining servers");
+    let _ = tx.send(true);
+}
+
 fn main() {
     env_logger::init();
 
@@ -138,6 +167,21 @@ fn main() {
     let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
     runtime.block_on(async move {
         spawn_challenge_pruner(auth_state.clone());
+
+        // Graceful shutdown: a watch flag flipped by the signal handler, awaited
+        // by every server via `serve_with_shutdown`.
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+        tokio::spawn(await_signal(shutdown_tx));
+
+        // Periodic metrics snapshot to the log.
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            interval.tick().await; // skip the immediate first tick
+            loop {
+                interval.tick().await;
+                jito_metrics::log_snapshot();
+            }
+        });
 
         // Leader-schedule tracker for routing. None => forward to all.
         let leader_tracker = match args.leader_rpc_url {
@@ -219,6 +263,7 @@ fn main() {
             let interceptor = AuthInterceptor::for_role(auth_state.clone(), Role::Searcher as i32);
             let auction = auction.clone();
             let interest = interest.clone();
+            let shutdown_rx = shutdown_rx.clone();
             tokio::spawn(async move {
                 let searcher_service_impl = SearcherServiceImpl::new(auction, interest);
                 let searcher_svc =
@@ -226,7 +271,7 @@ fn main() {
                 info!("starting searcher server at {}", args.searcher_addr);
                 Server::builder()
                     .add_service(searcher_svc)
-                    .serve(args.searcher_addr)
+                    .serve_with_shutdown(args.searcher_addr, wait_shutdown(shutdown_rx))
                     .await
                     .expect("searcher server starts");
             });
@@ -238,6 +283,7 @@ fn main() {
             let interceptor = AuthInterceptor::for_role(auth_state.clone(), Role::Relayer as i32);
             let interest = interest.clone();
             let forward_all = args.forward_all_packets;
+            let shutdown_rx = shutdown_rx.clone();
             tokio::spawn(async move {
                 let relayer_service_impl =
                     RelayerServerImpl::new(packet_sender, interest, forward_all);
@@ -246,7 +292,7 @@ fn main() {
                 info!("starting relayer server at {}", args.relayer_addr);
                 Server::builder()
                     .add_service(relayer_svc)
-                    .serve(args.relayer_addr)
+                    .serve_with_shutdown(args.relayer_addr, wait_shutdown(shutdown_rx))
                     .await
                     .expect("relayer server starts");
             });
@@ -255,13 +301,14 @@ fn main() {
         // start auth server (NOT token-protected — clients call it to get tokens)
         {
             let auth_state = auth_state.clone();
+            let shutdown_rx = shutdown_rx.clone();
             tokio::spawn(async move {
                 let auth_service_impl = AuthServiceImpl::new(auth_state);
                 let auth_svc = AuthServiceServer::new(auth_service_impl);
                 info!("starting auth server at {}", args.auth_addr);
                 Server::builder()
                     .add_service(auth_svc)
-                    .serve(args.auth_addr)
+                    .serve_with_shutdown(args.auth_addr, wait_shutdown(shutdown_rx))
                     .await
                     .expect("auth server starts");
             });
@@ -281,8 +328,10 @@ fn main() {
         info!("starting validator server at {}", args.validator_addr);
         Server::builder()
             .add_service(validator_svc)
-            .serve(args.validator_addr)
+            .serve_with_shutdown(args.validator_addr, wait_shutdown(shutdown_rx))
             .await
             .expect("validator server starts");
+
+        info!("validator server stopped; block engine shut down");
     });
 }

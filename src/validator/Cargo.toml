@@ -8,6 +8,7 @@ publish = false
 jito-protos = { path = "../jito_protos" }
 jito-auth = { path = "../auth" }
 jito-leader-tracker = { path = "../leader_tracker" }
+jito-metrics = { path = "../metrics" }
 log = { workspace = true }
 prost-types = { workspace = true }
 tokio = { workspace = true }

@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "src/jito_protos",
+    "src/metrics",
     "src/auth",
     "src/auction",
     "src/simulator",
@@ -18,6 +19,7 @@ members = [
 # default set — build it explicitly with `cargo build -p jito-searcher-client`.
 default-members = [
     "src/jito_protos",
+    "src/metrics",
     "src/auth",
     "src/auction",
     "src/simulator",
