@@ -33,7 +33,7 @@ Two channels stitch the services together (see `src/block_engine/src/main.rs`):
 | `relayer` | `BlockEngineRelayer` service — ingests packets from the relayer | ✅ **new** (reference never built this) |
 | `validator` | `BlockEngineValidator` service — fans packets+bundles to validators | ✅ builds |
 | `searcher` | `SearcherService` — accepts bundles | ⚠️ `send_bundle` works; rest `unimplemented!()` |
-| `auth` | `AuthService` — challenge/token issuance | ⚠️ **stub: returns hard-coded tokens, no crypto** |
+| `auth` | `AuthService` — ed25519 challenge/response + HS256 JWT, interceptor, pubkey allowlist | ✅ real, tested |
 | `block_engine` | binary wiring all services together | ✅ builds |
 | `searcher_client` | test "bundle blaster" | ⛔ excluded — pins solana 1.14, needs Agave 2.x port |
 
@@ -51,9 +51,9 @@ validator `:1003`, relayer `:1004`, auth `:1005`.
 
 This is a wiring skeleton. The MEV "brain" is intentionally absent:
 
-1. **Real auth** — `src/auth/src/server.rs` returns the literal strings
-   `"access_token"` / `"refresh_token"`. Needs ed25519 challenge/response +
-   signed-token verification (mirror the client side in `jito-foundation/jito-relayer`).
+1. ~~**Real auth**~~ ✅ done — ed25519 challenge/response + HS256 JWT in
+   `src/auth/`, enforced via an interceptor on the validator/relayer/searcher
+   services, with a configurable pubkey allowlist (`--allowed-pubkeys`).
 2. **The auction** — bundles are forwarded 1:1 immediately. A real engine
    buffers bundles, simulates them against bank state, and selects the
    highest-tip combination that fits the block CU limit.
