@@ -1,25 +1,14 @@
-//! Implements the `BlockEngineRelayer` gRPC service — the half of the protocol
-//! that the reference `block_engine_simple` never built.
-//!
-//! Data flow this wires up:
+//! `BlockEngineRelayer` gRPC service: the relayer-facing half of the protocol.
 //!
 //! ```text
-//!   relayer ──StartExpiringPacketStream──► [this service] ──packet_sender──► validator forwarder ──► validator
-//!   relayer ◄─SubscribeAccountsOfInterest─ [this service]   (engine tells relayer which state it cares about)
+//!   relayer ──StartExpiringPacketStream──► [service] ──packet_sender──► validator forwarder
+//!   relayer ◄─SubscribeAccountsOfInterest─ [service]   (accounts/programs the engine wants)
 //! ```
 //!
-//! The relayer opens a *bidirectional* stream and pushes `PacketBatchUpdate`
-//! messages (either real packet batches or heartbeats). We pull the batches out
-//! and shove them into the same `packet_sender` channel the validator service
-//! drains, so packets the relayer collects finally reach subscribed validators.
-//!
-//! Skeleton scope / TODO before production:
-//!   * Accounts/Programs of Interest are hard-coded to "*" (everything). A real
-//!     engine derives these from the bundles searchers submit, so the relayer
-//!     only forwards transactions that write-lock contended state.
-//!   * No auth interceptor yet (see the auth crate).
-//!   * Expiry (`expiry_ms`) is ignored — a real engine must drop/forward a batch
-//!     before the relayer's ~200ms hold elapses.
+//! The relayer opens a bidirectional stream and pushes `PacketBatchUpdate`
+//! messages (packet batches or heartbeats); batches are forwarded into the
+//! `packet_sender` channel the validator service drains. In return the engine
+//! streams the accounts/programs of interest it wants the relayer to forward.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -43,8 +32,7 @@ const UPDATE_INTERVAL: Duration = Duration::from_secs(5);
 
 pub struct RelayerServerImpl {
     /// Sends packet batches (with an optional expiry deadline) into the
-    /// validator forwarder. This is the `packet_sender` half that `main.rs`
-    /// previously left unused (`_packet_sender`).
+    /// validator forwarder.
     packet_sender: Sender<(PacketBatch, Option<Instant>)>,
     /// Source of accounts/programs of interest, derived from submitted bundles.
     interest: Arc<InterestRegistry>,
@@ -176,8 +164,7 @@ impl BlockEngineRelayer for RelayerServerImpl {
                             }
                         }
                         Some(Msg::Heartbeat(hb)) => {
-                            // Clock-sync signal from the relayer; a real engine
-                            // tracks drift here. Skeleton just logs at trace.
+                            // Clock-sync signal from the relayer.
                             log::trace!("relayer heartbeat count={}", hb.count);
                         }
                         None => {}

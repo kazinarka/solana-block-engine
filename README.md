@@ -1,137 +1,250 @@
 # Meridian Block Engine
 
-A self-hosted Solana block engine, bootstrapped from Jito's open-source
-[`block_engine_simple`](https://github.com/jito-labs/block_engine_simple) reference
-and modernized to a current Rust / `tonic` 0.12 / `prost` 0.13 toolchain.
+A self-hosted Solana block engine. It receives MEV **bundles** from searchers,
+runs a tip-based auction (with on-chain simulation), and streams the winning
+bundles to the validator that is about to produce a block — while feeding a
+relayer the accounts/programs it should forward and reporting each bundle's fate
+back to its submitter.
 
 It speaks the public [Jito MEV protocol](https://github.com/jito-labs/mev-protos)
-(vendored under `src/jito_protos/protos/`), so an unmodified jito-solana validator
-and a Jito-style relayer can connect to it without knowing it isn't Jito's engine.
+(vendored under `src/jito_protos/protos/`), so an unmodified jito-solana
+validator and a jito-style relayer can connect to it without modification. It is
+independent of Jito Labs' infrastructure: you run the engine, set the auction
+rules, configure the tip accounts, and keep the tips.
+
+> **Validator requirement:** bundles only reach a block if the leader runs a
+> validator client that ingests from an external block engine — today that means
+> **jito-solana** (stock Agave has no such hook). Pointing a jito-solana
+> validator's `--block-engine-url` at this engine is the supported deployment.
 
 ## Architecture
 
 ```
- Searchers ──SendBundle──────────────┐
-                                      ▼
- Relayer ──StartExpiringPacketStream──► [ MERIDIAN BLOCK ENGINE ] ──► Validator (jito-solana)
-   ▲                                      ├─ SearcherService   :1234     SubscribePackets
-   └──SubscribeAccountsOfInterest─────────┤  RelayerService    :1004     SubscribeBundles
-                                          ├─ AuthService       :1005
-                                          └─ ValidatorService  :1003
+ searchers ──SendBundle──────────────────┐
+                                          ▼
+ relayer ──StartExpiringPacketStream──►  BLOCK ENGINE  ──packets+bundles──► validator (jito-solana)
+   ▲                                       │  auth (ed25519 + JWT, per role)
+   └──SubscribeAccountsOfInterest──────────┤  auction (tip scoring + CU packing)
+                                           │  simulation (RPC dry-run)
+ searchers ◄──SubscribeBundleResults───────┘  leader-targeted routing + result tracking
 ```
 
-Two channels stitch the services together (see `src/block_engine/src/main.rs`):
+The engine runs four gRPC services plus an HTTP metrics endpoint:
 
-- `bundle_sender → bundle_receiver`: searcher submits a bundle → validator forwarder fans it out to subscribed validators.
-- `packet_sender → packet_receiver`: relayer streams packets in → validator forwarder fans them out.
+| Service | Default port | Who connects | Purpose |
+|---------|--------------|--------------|---------|
+| `AuthService` | `1005` | everyone (first) | ed25519 challenge/response → JWT access/refresh tokens |
+| `SearcherService` | `1234` | searchers | submit bundles, stream bundle results |
+| `BlockEngineRelayer` | `1004` | the relayer | stream packets in, receive accounts/programs of interest |
+| `BlockEngineValidator` | `1003` | the validator | subscribe to packets + winning bundles |
+| metrics (HTTP) | `9900` | Prometheus | `GET /metrics` |
+
+## How it works (request logic)
+
+### 1. Authentication
+
+Every connection authenticates before using a service. The flow matches the
+canonical jito-relayer client:
+
+1. Client calls `GenerateAuthChallenge { role, pubkey }`; the server returns a
+   random challenge nonce (stored per-pubkey with a short TTL).
+2. Client signs the string `"{pubkey_base58}-{challenge}"` with its ed25519 key
+   and calls `GenerateAuthTokens { challenge, client_pubkey, signed_challenge }`.
+3. The server rebuilds the expected string, verifies the signature against the
+   pubkey, and issues an **access** + **refresh** JWT (HS256, signed with an
+   in-process secret).
+
+The `AuthInterceptor` enforces a valid `Bearer` token on every other service and
+is **role-scoped**: a `SEARCHER` token is rejected on the validator service, and
+so on. An optional allowlist (`--allowed-pubkeys`) restricts who may authenticate
+at all. The auth state (challenge store + signing key) is shared in-process, so
+the issuing service and the validating interceptors agree on the same secret.
+
+### 2. Packet intake (relayer → engine)
+
+The relayer opens a bidirectional `StartExpiringPacketStream` and pushes
+`ExpiringPacketBatch` messages. Each batch carries an `expiry_ms` (the relayer's
+hold window); the engine converts that into a local deadline and forwards the
+batch into the validator-forwarder channel. Batches past their deadline are
+dropped rather than forwarded, so stale packets never reach the leader.
+
+In return, the engine streams **accounts/programs of interest** to the relayer
+(`SubscribeAccountsOfInterest` / `SubscribeProgramsOfInterest`). These are
+derived from submitted bundles: when a searcher submits a bundle, the engine
+records every *writable* account it references and every program it invokes
+(with a TTL). The relayer then forwards only transactions touching that contended
+state — not the entire packet flow. Setting `--forward-all-packets` advertises
+`"*"` instead (forward everything), which is useful for local testing.
+
+### 3. Bundle submission and the auction
+
+Searchers call `SendBundle`. Each bundle is recorded against its owner (for
+result routing), scanned for interest, and pushed into the auction buffer with a
+score:
+
+- **Tip** — the sum of lamports transferred via SystemProgram to any configured
+  `--tip-accounts` across the bundle's transactions.
+- **Compute units** — taken from simulation if available, otherwise a flat
+  `EST_CU_PER_TX` estimate per transaction.
+
+On every `--auction-interval-ms` tick the engine:
+
+1. Optionally simulates any not-yet-simulated bundles (see below), recording real
+   CU and dropping ones that fail.
+2. Drops bundles older than `--bundle-ttl-ms`.
+3. Ranks the rest by **tip-per-CU** (value density) and greedily selects the set
+   that fits `--block-cu-limit` — a knapsack heuristic that maximises total tip
+   within the block's compute budget.
+4. Emits the winners; the remainder are reported as auction losers and dropped.
+
+### 4. Simulation
+
+When `--sim-rpc-url` is set, bundles are dry-run against a Solana RPC node before
+they can win:
+
+- **Per-transaction** (default): each transaction is simulated with
+  `simulateTransaction` and `replace_recent_blockhash`; CU is summed and the
+  bundle fails on the first error. Works against any RPC.
+- **Atomic** (`--sim-atomic`): the whole bundle is simulated via jito-solana's
+  `simulateBundle` JSON-RPC, which runs the transactions sequentially against
+  shared state — accurate for bundles whose later transactions depend on earlier
+  ones. Requires a jito-solana RPC.
+
+Failing bundles are dropped so they don't waste block space. Without a sim RPC,
+the engine uses the CU estimate and never drops for failure.
+
+### 5. Leader-targeted delivery
+
+Validators subscribe to `SubscribePackets` and `SubscribeBundles`. Each
+subscription is tagged with the validator's authenticated identity (the JWT
+`sub`). When `--leader-rpc-url` is set, a background tracker polls
+`getLeaderSchedule` / `getEpochInfo` and the forwarder delivers only to the
+validator(s) leading within `--leader-lookahead-slots` of the current slot.
+Without a leader RPC, traffic fans out to all connected validators.
+
+### 6. Result tracking (engine → searcher)
+
+Searchers call `SubscribeBundleResults` to receive their bundles' outcomes,
+routed only to the submitting searcher:
+
+- `Accepted` — won the auction and was forwarded.
+- `Rejected` — lost the auction or failed simulation.
+- `Processed` / `Finalized` / `Dropped` — emitted by the on-chain tracker
+  (`--tracker-rpc-url`), which extracts each forwarded bundle's transaction
+  signatures and polls `getSignatureStatuses` until they confirm, finalize, or
+  exceed `--tracker-deadline-secs` without landing.
+
+### 7. Observability and lifecycle
+
+Process-wide counters (bundles received/won/dropped, accrued tip lamports,
+packets received/forwarded/expired, auth challenges/success/failures, validator
+subscriptions) are logged every 30s and exposed at `GET /metrics`
+(`--metrics-addr`) in Prometheus format. The engine drains all servers on
+`SIGINT`/`SIGTERM` for clean restarts.
 
 ## Crate layout (`src/`)
 
-| Crate | Role | Status |
-|-------|------|--------|
-| `jito_protos` | Generated gRPC bindings (vendored mev-protos) | ✅ modernized, builds |
-| `relayer` | `BlockEngineRelayer` service — ingests packets; streams derived AOI/POI | ✅ **new** (reference never built this) |
-| `interest` | derives accounts/programs of interest from submitted bundles | ✅ new |
-| `validator` | `BlockEngineValidator` service — routes packets+bundles to the leading validator | ✅ leader-aware |
-| `leader_tracker` | polls RPC for the leader schedule; answers "is X leading soon?" | ✅ new |
-| `searcher` | `SearcherService` — accepts bundles; streams bundle results | ✅ `send_bundle` + `SubscribeBundleResults`; some RPCs `unimplemented!()` |
-| `results` | routes per-bundle outcomes back to the submitting searcher | ✅ new |
-| `tracker` | polls RPC for forwarded bundles; emits Processed/Finalized/Dropped | ✅ new (`--tracker-rpc-url`) |
-| `auction` | scores bundles by tip, packs winners under a CU budget; accrues tip revenue | ✅ tip + real-CU/validity from simulation |
-| `simulator` | RPC bundle simulation: per-tx or atomic `simulateBundle` | ✅ `--sim-rpc-url` (+ `--sim-atomic`) |
-| `metrics` | process-wide counters; periodic log snapshot + Prometheus render | ✅ new |
-| `auth` | `AuthService` — ed25519 challenge/response + HS256 JWT, interceptor, pubkey allowlist | ✅ real, tested |
-| `block_engine` | binary wiring all services together | ✅ builds |
-| `searcher_client` | test "bundle blaster" (authenticates, then streams bundles) | ✅ Agave 3.x; not in default build |
+| Crate | Role |
+|-------|------|
+| `jito_protos` | Generated gRPC bindings from the vendored MEV protocol |
+| `auth` | `AuthService`, JWT issue/verify, the role-scoped interceptor |
+| `searcher` | `SearcherService` — bundle submission + result subscription |
+| `relayer` | `BlockEngineRelayer` — packet intake + interest advertisement |
+| `validator` | `BlockEngineValidator` — packet/bundle fan-out, leader routing |
+| `auction` | Tip scoring and CU-budget winner selection |
+| `simulator` | RPC bundle simulation (per-tx or atomic) |
+| `interest` | Derives accounts/programs of interest from bundles |
+| `leader_tracker` | Tracks the leader schedule via RPC |
+| `tracker` | Tracks forwarded bundles on-chain, emits results |
+| `results` | Routes per-bundle outcomes to the submitting searcher |
+| `metrics` | Process-wide counters + Prometheus rendering |
+| `block_engine` | Binary that wires the services together |
+| `searcher_client` | Test tools: a bundle blaster + a `validator_sub` subscriber |
+
+## Configuration
+
+All options are CLI flags or environment variables.
+
+| Flag | Env | Default | Description |
+|------|-----|---------|-------------|
+| `--searcher-addr` | `SEARCHER_ADDR` | `0.0.0.0:1234` | searcher service bind |
+| `--validator-addr` | `VALIDATOR_ADDR` | `0.0.0.0:1003` | validator service bind |
+| `--relayer-addr` | `RELAYER_ADDR` | `0.0.0.0:1004` | relayer service bind |
+| `--auth-addr` | `AUTH_ADDR` | `0.0.0.0:1005` | auth service bind |
+| `--metrics-addr` | `METRICS_ADDR` | `0.0.0.0:9900` | Prometheus endpoint bind |
+| `--auth-jwt-secret` | `AUTH_JWT_SECRET` | random | HS256 token secret (set it to survive restarts) |
+| `--allowed-pubkeys` | `ALLOWED_PUBKEYS` | empty (any) | comma-separated base58 allowlist |
+| `--tip-accounts` | `TIP_ACCOUNTS` | empty | comma-separated base58 tip accounts |
+| `--auction-interval-ms` | — | `200` | auction tick period |
+| `--block-cu-limit` | — | `48000000` | per-block CU budget |
+| `--bundle-ttl-ms` | — | `200` | drop bundles older than this |
+| `--sim-rpc-url` | `SIM_RPC_URL` | unset | RPC for bundle simulation |
+| `--sim-atomic` | `SIM_ATOMIC` | false | use jito-solana `simulateBundle` |
+| `--leader-rpc-url` | `LEADER_RPC_URL` | unset | RPC for leader schedule (else fan out to all) |
+| `--leader-lookahead-slots` | — | `2` | how far ahead a validator counts as leader |
+| `--tracker-rpc-url` | `TRACKER_RPC_URL` | unset | RPC for on-chain result tracking |
+| `--tracker-deadline-secs` | — | `90` | mark a bundle dropped if not landed by then |
+| `--forward-all-packets` | `FORWARD_ALL_PACKETS` | false | advertise `"*"` to the relayer |
+| `--interest-ttl-ms` | — | `2000` | how long an account stays "of interest" |
+| `--block-builder-pubkey` | — | system pubkey | fee collector returned to validators |
+| `--block-builder-commission` | — | `5` | block-builder commission percent |
+| `--block-engine-url` | `BLOCK_ENGINE_URL` | unset | global endpoint advertised for region discovery |
+| `--shredstream-addr` | `SHREDSTREAM_ADDR` | empty | shredstream addr for the global endpoint |
+| `--regioned-endpoint` | `REGIONED_ENDPOINT` | empty | `url\|shredstream` regioned endpoints (comma-separated) |
 
 ## Build & run
 
-Built against the Solana/Agave **3.x** crate line; needs a recent stable Rust
-(the 3.x crates' MSRV is ≥ 1.89 — `rustup update stable`).
+Built against the Solana/Agave **3.x** crate line; requires a recent stable Rust
+(MSRV ≥ 1.89 — `rustup update stable`).
 
 ```bash
 cargo build --release
-RUST_LOG=info ./target/release/jito-block-engine
+RUST_LOG=info ./target/release/jito-block-engine \
+  --allowed-pubkeys <validator>,<relayer>,<searcher pubkeys> \
+  --tip-accounts <your tip account(s)> \
+  --leader-rpc-url <your validator RPC> \
+  --sim-rpc-url <your jito-solana RPC> --sim-atomic \
+  --tracker-rpc-url <your RPC>
 ```
 
-Default bind addresses (override via flags or env): searcher `:1234`,
-validator `:1003`, relayer `:1004`, auth `:1005`.
+Then point a jito-solana validator's `--block-engine-url` at `:1003`, your
+relayer at `:1004` (both authenticate via `:1005`), and scrape `:9900/metrics`.
 
-## Implementation status (the parts Jito never open-sourced)
-
-The full MEV pipeline is implemented and tested:
-
-1. ~~**Real auth**~~ ✅ done — ed25519 challenge/response + HS256 JWT in
-   `src/auth/`, enforced via an interceptor on the validator/relayer/searcher
-   services, with a configurable pubkey allowlist (`--allowed-pubkeys`) and
-   per-role scoping (a SEARCHER token can't subscribe on the validator service).
-2. ~~**The auction**~~ ✅ done (step 4a) — bundles are buffered, scored by tip
-   (lamports to `--tip-accounts`), and the highest tip-per-CU set that fits
-   `--block-cu-limit` is emitted each `--auction-interval-ms` tick.
-3. ~~**Bundle simulation**~~ ✅ done — `simulator` delegates to a Solana RPC
-   (`--sim-rpc-url`, ideally your jito-solana validator): real CU replaces the
-   estimate and bundles that fail simulation are dropped. Defaults to per-tx
-   `simulateTransaction`; `--sim-atomic` uses jito-solana's atomic
-   `simulateBundle` (state-aware, accurate for dependent bundles).
-4. ~~**Leader-aware routing**~~ ✅ done — `leader_tracker` polls RPC for the
-   schedule; the validator service tags each subscription with the validator's
-   authenticated identity and forwards only to upcoming leaders. Enable with
-   `--leader-rpc-url`; without it, traffic fans out to all (local testing).
-5. ~~**Accounts/Programs of Interest**~~ ✅ done — the `interest` registry
-   derives writable accounts + invoked programs from submitted bundles, and the
-   relayer service streams them (use `--forward-all-packets` for the old "*"
-   behaviour).
-6. ~~**Expiry handling**~~ ✅ done — each packet batch carries an engine-local
-   deadline derived from the relayer's `expiry_ms`; the validator forwarder
-   drops batches past their deadline instead of forwarding stale packets.
-
-The block-builder fee info is now configurable too (`--block-builder-pubkey`,
-`--block-builder-commission`) instead of an all-1s placeholder.
-
-7. ~~**Observability & shutdown**~~ ✅ done — the `metrics` crate tracks
-   bundles received/won/dropped, accrued tip lamports, packets
-   received/forwarded/expired, and auth challenges/success/failures, logged
-   every 30s and scrapable at `GET /metrics` (`--metrics-addr`, default
-   `0.0.0.0:9900`). The engine drains all servers cleanly on SIGINT/SIGTERM.
-8. ~~**Bundle results**~~ ✅ done — searchers stream `SubscribeBundleResults`;
-   the auction reports accepted/rejected and the `tracker`
-   (`--tracker-rpc-url`) reports on-chain Processed/Finalized/Dropped.
-9. ~~**Region discovery**~~ ✅ done — `GetBlockEngineEndpoints` advertises the
-   configured `--block-engine-url` + `--regioned-endpoint`s.
-10. ~~**Tip accounting**~~ ✅ done — won-bundle tips accrue to the
-    `tips_lamports_total` metric.
-
-**Genuinely out of scope** (a separate on-chain component, not engine code): the
-TipPaymentProgram / TipDistributionProgram that perform the *on-chain* merkle
-payout of accrued tips to validators and stakers. The engine does the off-chain
-accounting and tells validators which pubkey collects the fee
-(`GetBlockBuilderFeeInfo`); deploying/operating those Anchor programs is a
-separate project.
-
-## Testing end-to-end
-
-`scripts/e2e_test.sh` runs the whole pipeline against a local
-`solana-test-validator`: it starts the validator, runs the engine (auth +
-auction + per-tx simulation + on-chain tracking), connects a VALIDATOR-role
-bundle subscriber (`validator_sub`), blasts bundles with the searcher client,
-and asserts they traverse auth → auction → simulate → forward → subscriber.
+The default build excludes the heavy Solana client used by the test tools; build
+them on demand:
 
 ```bash
-./scripts/e2e_test.sh
-# ... E2E PASS: bundles flowed auth -> auction -> forward -> validator subscriber
+cargo build -p jito-searcher-client   # builds jito-searcher-client + validator_sub
 ```
 
-The two test binaries it uses (not in the default build):
+## Testing
 
 ```bash
-cargo build -p jito-searcher-client      # builds jito-searcher-client + validator_sub
+cargo test            # unit + integration tests across the workspace
+./scripts/e2e_test.sh # full pipeline against a local solana-test-validator
 ```
 
-- `jito-searcher-client` — authenticates as SEARCHER, airdrops, blasts bundles.
-- `validator_sub` — authenticates as VALIDATOR, subscribes to the bundle stream.
+The e2e script starts a test validator, runs the engine, connects a
+VALIDATOR-role subscriber, blasts bundles with the searcher client, and asserts
+they flow auth → auction → simulation → forward → subscriber.
+
+## Tech stack
+
+- **Rust**, `tonic` (gRPC) + `prost` (protobuf), `tokio` async runtime.
+- `axum` for the metrics HTTP endpoint.
+- `jsonwebtoken` (HS256) + `ed25519-dalek` for auth.
+- `solana-client` / `solana-sdk` (3.x) for RPC and transaction types.
+
+## Scope
+
+The engine performs the off-chain MEV pipeline and the auction. It does not
+include the on-chain TipPayment / TipDistribution programs that perform the
+on-chain payout of accrued tips to validators and stakers — those are separate
+on-chain components. The engine tracks accrued tips and reports the fee collector
+pubkey via `GetBlockBuilderFeeInfo`.
 
 ## Provenance
 
 - Skeleton: [`jito-labs/block_engine_simple`](https://github.com/jito-labs/block_engine_simple) (Apache-2.0)
-- Protocol: [`jito-labs/mev-protos`](https://github.com/jito-labs/mev-protos)
-- Relayer reference (other side of the wire): [`jito-foundation/jito-relayer`](https://github.com/jito-foundation/jito-relayer)
+- Protocol: [`jito-labs/mev-protos`](https://github.com/jito-labs/mev-protos) (see `src/jito_protos/protos/VENDOR.md`)
+- Relayer reference: [`jito-foundation/jito-relayer`](https://github.com/jito-foundation/jito-relayer)

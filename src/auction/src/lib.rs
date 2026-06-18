@@ -1,17 +1,11 @@
 //! Bundle auction: buffers incoming bundles, scores each by the tip it pays,
-//! and selects the highest-value set that fits the block's compute-unit budget.
+//! and selects the highest tip-per-CU set that fits the block's compute-unit
+//! budget. Submitted bundles accumulate in a buffer; each auction tick runs
+//! [`Auction::run_auction`], which returns the winners and drops the rest.
 //!
-//! This replaces the reference engine's "forward every bundle immediately"
-//! behaviour. Searchers submit bundles, which accumulate in a buffer; on each
-//! auction tick the engine runs [`Auction::run_auction`], emits the winners to
-//! the validator, and drops the rest.
-//!
-//! ## What's real vs estimated here (step 4a)
-//! * **Tip** is extracted for real: we decode each transaction and sum lamports
-//!   transferred (via SystemProgram) to any configured tip account.
-//! * **Compute units** are *estimated* (`EST_CU_PER_TX` per transaction). Real
-//!   per-bundle CU comes from simulation (step 4b); until then the CU budget is
-//!   a coarse packing bound.
+//! A bundle's tip is the sum of lamports transferred (via SystemProgram) to any
+//! configured tip account. Compute units come from simulation when available,
+//! otherwise from a flat per-transaction estimate ([`EST_CU_PER_TX`]).
 
 use std::collections::HashSet;
 use std::str::FromStr;
@@ -235,13 +229,10 @@ impl Auction {
                 used_cu += cu;
                 total_tip = total_tip.saturating_add(pb.tip_lamports);
                 if let Some(r) = &self.results {
-                    // Reported as accepted/forwarded by the engine. (slot and
-                    // validator identity are populated at forward time later.)
                     r.publish_accepted(&uuid, 0, String::new());
                 }
                 winners.push(pb.bundle);
             } else if let Some(r) = &self.results {
-                // Bid wasn't high enough to fit the winning set this round.
                 r.publish_lost_auction(&uuid, String::new(), pb.tip_lamports);
             }
         }
