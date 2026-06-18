@@ -68,8 +68,11 @@ RUST_LOG=info ./target/debug/validator_sub \
 PIDS+=($!)
 sleep 3
 
-echo "--- blasting bundles (15s) ---"
-RUST_LOG=info timeout 15 ./target/debug/jito-searcher-client \
+# The searcher warms up (~3-10s) before sending: airdrop + a fixed 5s settle,
+# slower right after a cold validator start. Give it a generous window so the
+# actual bundle blasting isn't cut off.
+echo "--- blasting bundles (35s, incl. searcher warm-up) ---"
+RUST_LOG=info timeout 35 ./target/debug/jito-searcher-client \
   --keypair-path "$SEARCHER_KP" \
   --auth-service-url http://localhost:1005 \
   --searcher-service-url http://localhost:1234 \
