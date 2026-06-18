@@ -20,7 +20,7 @@ use jito_protos::packet::Packet;
 use jito_results::BundleResults;
 use log::{debug, warn};
 use solana_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::commitment_config::CommitmentConfig;
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::signature::Signature;
 use solana_sdk::transaction::VersionedTransaction;
 use solana_transaction_status_client_types::TransactionConfirmationStatus;

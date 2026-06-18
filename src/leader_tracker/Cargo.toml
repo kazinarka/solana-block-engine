@@ -11,5 +11,6 @@ path = "src/lib.rs"
 [dependencies]
 log = { workspace = true }
 tokio = { workspace = true }
-solana-client = "2"
-solana-sdk = "2"
+solana-client = "3"
+solana-sdk = "3"
+solana-commitment-config = "3"

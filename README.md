@@ -42,9 +42,12 @@ Two channels stitch the services together (see `src/block_engine/src/main.rs`):
 | `metrics` | process-wide counters; periodic log snapshot + Prometheus render | ✅ new |
 | `auth` | `AuthService` — ed25519 challenge/response + HS256 JWT, interceptor, pubkey allowlist | ✅ real, tested |
 | `block_engine` | binary wiring all services together | ✅ builds |
-| `searcher_client` | test "bundle blaster" (authenticates, then streams bundles) | ✅ ported to Agave 2.x; not in default build |
+| `searcher_client` | test "bundle blaster" (authenticates, then streams bundles) | ✅ Agave 3.x; not in default build |
 
 ## Build & run
+
+Built against the Solana/Agave **3.x** crate line; needs a recent stable Rust
+(the 3.x crates' MSRV is ≥ 1.89 — `rustup update stable`).
 
 ```bash
 cargo build --release

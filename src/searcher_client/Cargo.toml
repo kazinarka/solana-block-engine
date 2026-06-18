@@ -12,8 +12,9 @@ env_logger = { workspace = true }
 log = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
-solana-sdk = "2"
-solana-client = "2"
-solana-system-transaction = "2"
+solana-sdk = "3"
+solana-commitment-config = "3"
+solana-client = "3"
+solana-system-transaction = "3"
 tokio = { workspace = true }
 tonic = { workspace = true }

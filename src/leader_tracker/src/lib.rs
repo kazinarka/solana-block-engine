@@ -19,7 +19,7 @@ use std::time::Duration;
 use log::{info, warn};
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::clock::Slot;
-use solana_sdk::commitment_config::CommitmentConfig;
+use solana_commitment_config::CommitmentConfig;
 
 /// How often to poll the current slot.
 const POLL_INTERVAL: Duration = Duration::from_millis(400);

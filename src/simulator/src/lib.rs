@@ -20,7 +20,7 @@ use jito_protos::packet::Packet;
 use log::{debug, warn};
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_client::rpc_config::RpcSimulateTransactionConfig;
-use solana_sdk::commitment_config::CommitmentConfig;
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::transaction::VersionedTransaction;
 
 pub struct RpcSimulator {
