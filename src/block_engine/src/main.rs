@@ -149,7 +149,7 @@ struct Args {
     #[clap(long, env = "JITO_BLOCK_ENGINE_URL")]
     jito_block_engine_url: Option<String>,
 
-    #[clap(long, env = "JITO_BLOCK_ENGINE_TLS", default_value_t = true)]
+    #[clap(long, env = "JITO_BLOCK_ENGINE_TLS", action = clap::ArgAction::Set, default_value_t = true)]
     jito_block_engine_tls: bool,
 
     #[clap(long, env = "IDENTITY_KEYPAIR")]

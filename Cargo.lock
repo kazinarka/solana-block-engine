@@ -2130,6 +2130,7 @@ dependencies = [
  "bincode",
  "clap",
  "env_logger",
+ "jito-auth",
  "jito-protos",
  "log",
  "prost",
@@ -2139,6 +2140,7 @@ dependencies = [
  "solana-sdk",
  "solana-system-transaction",
  "tokio",
+ "tokio-stream",
  "tonic",
 ]
 
