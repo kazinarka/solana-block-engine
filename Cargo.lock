@@ -2038,6 +2038,7 @@ dependencies = [
  "jito-searcher",
  "jito-simulator",
  "jito-tracker",
+ "jito-upstream",
  "jito-validator",
  "log",
  "tokio",

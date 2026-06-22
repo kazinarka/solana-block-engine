@@ -21,6 +21,8 @@ use jito_relayer_service::server::RelayerServerImpl;
 use jito_results::BundleResults;
 use jito_simulator::RpcSimulator;
 use jito_tracker::BundleTracker;
+use jito_upstream::consumer::{start as start_upstream, UpstreamConfig};
+use jito_upstream::read_identity;
 use jito_searcher::server::SearcherServiceImpl;
 use jito_validator::server::ValidatorServerImpl;
 use log::{info, warn};
@@ -143,6 +145,15 @@ struct Args {
     /// (comma-separated). Example: "https://ny.be:443|ny.shred:1002".
     #[clap(long, env, value_delimiter = ',')]
     regioned_endpoint: Vec<String>,
+
+    #[clap(long, env = "JITO_BLOCK_ENGINE_URL")]
+    jito_block_engine_url: Option<String>,
+
+    #[clap(long, env = "JITO_BLOCK_ENGINE_TLS", default_value_t = true)]
+    jito_block_engine_tls: bool,
+
+    #[clap(long, env = "IDENTITY_KEYPAIR")]
+    identity_keypair: Option<String>,
 }
 
 /// Parse a "url|shredstream_addr" spec into a BlockEngineEndpoint (the
@@ -250,6 +261,52 @@ fn main() {
                 }
             });
         }
+
+        let (upstream_fee_info, upstream_endpoints) =
+            match (&args.jito_block_engine_url, &args.identity_keypair) {
+                (Some(url), Some(keypair_path)) => match read_identity(keypair_path) {
+                    Ok(keypair) => {
+                        info!("connecting upstream to Jito block engine {url}");
+                        let upstream = start_upstream(
+                            UpstreamConfig {
+                                url: url.clone(),
+                                tls: args.jito_block_engine_tls,
+                            },
+                            keypair,
+                        );
+                        let mut upstream_bundles = upstream.bundles;
+                        let mut upstream_packets = upstream.packets;
+                        let fee_info = upstream.fee_info;
+                        let endpoints = upstream.endpoints;
+
+                        let bundle_out = bundle_sender.clone();
+                        tokio::spawn(async move {
+                            while let Some(bundle) = upstream_bundles.recv().await {
+                                if bundle_out.send(bundle).await.is_err() {
+                                    break;
+                                }
+                            }
+                        });
+                        let packet_out = packet_sender.clone();
+                        tokio::spawn(async move {
+                            while let Some(batch) = upstream_packets.recv().await {
+                                if packet_out.send((batch, None)).await.is_err() {
+                                    break;
+                                }
+                            }
+                        });
+                        (Some(fee_info), Some(endpoints))
+                    }
+                    Err(e) => {
+                        warn!("failed to load identity keypair {keypair_path}: {e}; upstream disabled");
+                        (None, None)
+                    }
+                },
+                _ => {
+                    warn!("JITO_BLOCK_ENGINE_URL / IDENTITY_KEYPAIR not set; upstream passthrough disabled");
+                    (None, None)
+                }
+            };
 
         // Leader-schedule tracker for routing. None => forward to all.
         let leader_tracker = match args.leader_rpc_url {
@@ -443,6 +500,8 @@ fn main() {
             args.block_builder_commission,
             global_endpoint,
             regioned_endpoints,
+            upstream_fee_info,
+            upstream_endpoints,
         );
         let validator_svc =
             BlockEngineValidatorServer::with_interceptor(validator_impl, interceptor);

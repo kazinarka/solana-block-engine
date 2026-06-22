@@ -16,6 +16,7 @@ jito-tracker = { path = "../tracker" }
 jito-protos = { path = "../jito_protos" }
 jito-relayer-service = { path = "../relayer" }
 jito-searcher = { path = "../searcher" }
+jito-upstream = { path = "../jito_upstream" }
 jito-validator = { path = "../validator" }
 axum = "0.7"
 clap = { workspace = true }

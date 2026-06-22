@@ -18,6 +18,7 @@ use std::thread::{Builder, JoinHandle};
 use std::time::Instant;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::watch;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
@@ -41,14 +42,12 @@ pub struct ValidatorServerImpl {
     forwarder_thread: JoinHandle<()>,
     packet_subscriptions: PacketSubs,
     bundle_subscriptions: BundleSubs,
-    /// Pubkey that collects the block-builder fee (tip distribution account).
     block_builder_pubkey: String,
-    /// Block-builder commission (0-100).
     block_builder_commission: u64,
-    /// Global endpoint advertised to clients for region discovery.
     global_endpoint: Option<BlockEngineEndpoint>,
-    /// Regioned endpoints advertised to clients.
     regioned_endpoints: Vec<BlockEngineEndpoint>,
+    upstream_fee_info: Option<watch::Receiver<Option<BlockBuilderFeeInfoResponse>>>,
+    upstream_endpoints: Option<watch::Receiver<Option<GetBlockEngineEndpointResponse>>>,
 }
 
 /// Should this subscriber receive traffic right now? Yes if no leader tracker is
@@ -79,6 +78,8 @@ impl ValidatorServerImpl {
         block_builder_commission: u64,
         global_endpoint: Option<BlockEngineEndpoint>,
         regioned_endpoints: Vec<BlockEngineEndpoint>,
+        upstream_fee_info: Option<watch::Receiver<Option<BlockBuilderFeeInfoResponse>>>,
+        upstream_endpoints: Option<watch::Receiver<Option<GetBlockEngineEndpointResponse>>>,
     ) -> Self {
         let packet_subscriptions = Arc::new(Mutex::new(HashMap::default()));
         let bundle_subscriptions = Arc::new(Mutex::new(HashMap::default()));
@@ -97,6 +98,8 @@ impl ValidatorServerImpl {
             block_builder_commission,
             global_endpoint,
             regioned_endpoints,
+            upstream_fee_info,
+            upstream_endpoints,
         }
     }
 
@@ -264,22 +267,26 @@ impl BlockEngineValidator for ValidatorServerImpl {
         &self,
         _request: Request<BlockBuilderFeeInfoRequest>,
     ) -> Result<Response<BlockBuilderFeeInfoResponse>, Status> {
-        let response = BlockBuilderFeeInfoResponse {
+        if let Some(rx) = &self.upstream_fee_info {
+            if let Some(response) = rx.borrow().clone() {
+                return Ok(Response::new(response));
+            }
+        }
+        Ok(Response::new(BlockBuilderFeeInfoResponse {
             pubkey: self.block_builder_pubkey.clone(),
             commission: self.block_builder_commission,
-        };
-
-        info!("get_block_builder_fee_info response: {:?}", response);
-
-        Ok(Response::new(response))
+        }))
     }
 
     async fn get_block_engine_endpoints(
         &self,
         _request: Request<GetBlockEngineEndpointRequest>,
     ) -> Result<Response<GetBlockEngineEndpointResponse>, Status> {
-        // Endpoint discovery: advertise the configured global + regioned URLs so
-        // clients can pick the closest region.
+        if let Some(rx) = &self.upstream_endpoints {
+            if let Some(response) = rx.borrow().clone() {
+                return Ok(Response::new(response));
+            }
+        }
         Ok(Response::new(GetBlockEngineEndpointResponse {
             global_endpoint: self.global_endpoint.clone(),
             regioned_endpoints: self.regioned_endpoints.clone(),
