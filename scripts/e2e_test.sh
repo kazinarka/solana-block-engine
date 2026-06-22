@@ -99,8 +99,18 @@ echo "  jito passthrough: $JITO_PASSTHROUGH"
 echo "  bot bundles: $BOT_BUNDLES"
 curl -s -m 3 http://127.0.0.1:9911/metrics | grep -E "bundles_won|tips_lamports|auth_success|jito_bundles_relayed|upstream_connects" || true
 
-if [ "$JITO_PASSTHROUGH" -gt 0 ] && [ "$BOT_BUNDLES" -gt 0 ]; then
-  echo "E2E PASS: jito passthrough and bot bundles both reached the validator"
+echo "--- safe-failure: killing mock jito upstream ---"
+pkill -f mock_jito 2>/dev/null || true
+sleep 6
+ENGINE_ALIVE=$(curl -s -m 3 http://127.0.0.1:9911/metrics >/dev/null 2>&1 && echo yes || echo no)
+DISCONNECTS=$(curl -s -m 3 http://127.0.0.1:9911/metrics | grep "^upstream_disconnects_total " | awk '{print $2}')
+DISCONNECTS=${DISCONNECTS:-0}
+echo "engine alive after upstream kill: $ENGINE_ALIVE; upstream disconnects: $DISCONNECTS"
+
+if [ "$JITO_PASSTHROUGH" -gt 0 ] && [ "$BOT_BUNDLES" -gt 0 ] \
+   && [ "$ENGINE_ALIVE" = "yes" ] && [ "$DISCONNECTS" -gt 0 ]; then
+  echo "E2E PASS: merge works and the engine survived upstream failure"
 else
-  echo "E2E FAIL: jito=$JITO_PASSTHROUGH bot=$BOT_BUNDLES"; exit 1
+  echo "E2E FAIL: jito=$JITO_PASSTHROUGH bot=$BOT_BUNDLES alive=$ENGINE_ALIVE disconnects=$DISCONNECTS"
+  exit 1
 fi

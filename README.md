@@ -217,6 +217,38 @@ them on demand:
 cargo build -p jito-searcher-client   # builds jito-searcher-client + validator_sub
 ```
 
+## Proxy mode (interpose on Jito)
+
+The engine can run in front of Jito's block engine: it authenticates upstream to
+Jito as your validator, relays Jito's bundles, packets, and fee info to your
+validator unchanged, and additively merges your own bundles (submitted by your
+MEV bot through the searcher service). Your validator then points at this proxy
+instead of at Jito directly.
+
+```bash
+RUST_LOG=info ./target/release/jito-block-engine \
+  --jito-block-engine-url https://<region>.block-engine.jito.wtf \
+  --identity-keypair /path/to/validator-identity.json \
+  --allowed-pubkeys <your bot searcher pubkey>,<your validator pubkey> \
+  --leader-rpc-url <your RPC> --sim-rpc-url <your RPC> --tracker-rpc-url <your RPC>
+```
+
+Jito bundles pass through untouched; the bot's bundles are appended. If the
+upstream link drops, the proxy keeps serving the validator and reconnects with
+backoff — it never blocks block production. To roll back, repoint the validator's
+`--block-engine-url` at Jito and restart.
+
+Deployment notes:
+
+- Run the proxy on the validator host so the identity key never leaves the box.
+- Validate on testnet first, then mainnet with the rollback path ready.
+- **Before connecting a real jito-solana validator**: it authenticates and
+  subscribes over a single `--block-engine-url`, so the proxy must serve the
+  `AuthService` and `BlockEngineValidator` on one shared address. This build
+  still exposes them on separate ports (`:1005` / `:1003`), which the bundled
+  test clients use; co-locating them on one endpoint is the remaining step for
+  real-validator hookup.
+
 ## Testing
 
 ```bash
