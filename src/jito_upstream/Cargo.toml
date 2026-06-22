@@ -1,0 +1,20 @@
+[package]
+name = "jito-upstream"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "jito_upstream"
+path = "src/lib.rs"
+
+[dependencies]
+jito-protos = { path = "../jito_protos" }
+tonic = { workspace = true, features = ["tls-webpki-roots"] }
+solana-sdk = "3"
+tokio = { workspace = true }
+log = { workspace = true }
+
+[dev-dependencies]
+jito-auth = { path = "../auth" }
+tokio-stream = { workspace = true }
