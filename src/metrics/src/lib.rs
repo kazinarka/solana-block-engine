@@ -48,6 +48,10 @@ counters! {
     AUTH_SUCCESS => "auth_success_total",
     AUTH_FAILURES => "auth_failures_total",
     VALIDATOR_SUBSCRIPTIONS => "validator_subscriptions_total",
+    JITO_BUNDLES_RELAYED => "jito_bundles_relayed_total",
+    JITO_PACKETS_RELAYED => "jito_packets_relayed_total",
+    UPSTREAM_CONNECTS => "upstream_connects_total",
+    UPSTREAM_DISCONNECTS => "upstream_disconnects_total",
 }
 
 pub fn inc_bundles_received() {
@@ -83,6 +87,18 @@ pub fn inc_auth_failures() {
 }
 pub fn inc_validator_subscriptions() {
     VALIDATOR_SUBSCRIPTIONS.fetch_add(1, Relaxed);
+}
+pub fn inc_jito_bundles_relayed() {
+    JITO_BUNDLES_RELAYED.fetch_add(1, Relaxed);
+}
+pub fn inc_jito_packets_relayed() {
+    JITO_PACKETS_RELAYED.fetch_add(1, Relaxed);
+}
+pub fn inc_upstream_connects() {
+    UPSTREAM_CONNECTS.fetch_add(1, Relaxed);
+}
+pub fn inc_upstream_disconnects() {
+    UPSTREAM_DISCONNECTS.fetch_add(1, Relaxed);
 }
 
 #[cfg(test)]

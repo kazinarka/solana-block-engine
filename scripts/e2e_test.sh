@@ -97,7 +97,7 @@ echo "auction rounds with winners: $WON"
 echo "bundles received by validator: $RECEIVED"
 echo "  jito passthrough: $JITO_PASSTHROUGH"
 echo "  bot bundles: $BOT_BUNDLES"
-curl -s -m 3 http://127.0.0.1:9911/metrics | grep -E "bundles_won|tips_lamports|auth_success" || true
+curl -s -m 3 http://127.0.0.1:9911/metrics | grep -E "bundles_won|tips_lamports|auth_success|jito_bundles_relayed|upstream_connects" || true
 
 if [ "$JITO_PASSTHROUGH" -gt 0 ] && [ "$BOT_BUNDLES" -gt 0 ]; then
   echo "E2E PASS: jito passthrough and bot bundles both reached the validator"

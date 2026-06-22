@@ -10,6 +10,7 @@ path = "src/lib.rs"
 
 [dependencies]
 jito-protos = { path = "../jito_protos" }
+jito-metrics = { path = "../metrics" }
 tonic = { workspace = true, features = ["tls-webpki-roots"] }
 solana-sdk = "3"
 tokio = { workspace = true }

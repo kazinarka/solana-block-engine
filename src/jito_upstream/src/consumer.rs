@@ -63,10 +63,12 @@ async fn run(
     loop {
         match session(&config, &keypair, &bundle_tx, &packet_tx, &fee_tx, &ep_tx).await {
             Ok(()) => {
+                jito_metrics::inc_upstream_disconnects();
                 info!("upstream session ended; reconnecting");
                 backoff = INITIAL_BACKOFF;
             }
             Err(e) => {
+                jito_metrics::inc_upstream_disconnects();
                 warn!("upstream session error: {e}; reconnecting in {backoff:?}");
             }
         }
@@ -124,6 +126,7 @@ async fn session(
         .subscribe_packets(SubscribePacketsRequest {})
         .await?
         .into_inner();
+    jito_metrics::inc_upstream_connects();
     info!("upstream subscribed to bundles and packets");
 
     loop {

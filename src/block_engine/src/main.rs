@@ -282,6 +282,7 @@ fn main() {
                         let bundle_out = bundle_sender.clone();
                         tokio::spawn(async move {
                             while let Some(bundle) = upstream_bundles.recv().await {
+                                jito_metrics::inc_jito_bundles_relayed();
                                 if bundle_out.send(bundle).await.is_err() {
                                     break;
                                 }
@@ -290,6 +291,7 @@ fn main() {
                         let packet_out = packet_sender.clone();
                         tokio::spawn(async move {
                             while let Some(batch) = upstream_packets.recv().await {
+                                jito_metrics::inc_jito_packets_relayed();
                                 if packet_out.send((batch, None)).await.is_err() {
                                     break;
                                 }

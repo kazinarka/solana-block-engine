@@ -2180,6 +2180,7 @@ name = "jito-upstream"
 version = "0.1.0"
 dependencies = [
  "jito-auth",
+ "jito-metrics",
  "jito-protos",
  "log",
  "solana-sdk",
