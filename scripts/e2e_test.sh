@@ -72,8 +72,7 @@ sleep 3
 echo "--- starting validator subscriber ---"
 RUST_LOG=info ./target/debug/validator_sub \
   --keypair-path "$VAL_KP" \
-  --auth-service-url http://localhost:1005 \
-  --validator-service-url http://localhost:1003 \
+  --block-engine-url http://localhost:1003 \
   >"$VALSUB_LOG" 2>&1 &
 PIDS+=($!)
 sleep 3

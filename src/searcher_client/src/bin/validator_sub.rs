@@ -19,10 +19,7 @@ use tonic::Request;
 #[derive(Parser, Debug)]
 struct Args {
     #[clap(long, env, default_value_t = String::from("http://localhost:1003"))]
-    validator_service_url: String,
-
-    #[clap(long, env, default_value_t = String::from("http://localhost:1005"))]
-    auth_service_url: String,
+    block_engine_url: String,
 
     #[clap(long, env, default_value_t = String::from("./keypair.json"))]
     keypair_path: String,
@@ -64,15 +61,15 @@ fn main() {
 
     let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
     runtime.block_on(async move {
-        let access_token = authenticate(args.auth_service_url, &kp).await;
+        let access_token = authenticate(args.block_engine_url.clone(), &kp).await;
         info!("validator authenticated as {}", kp.pubkey());
         let bearer: MetadataValue<_> = format!("Bearer {access_token}").parse().unwrap();
 
-        let channel = Channel::from_shared(args.validator_service_url)
+        let channel = Channel::from_shared(args.block_engine_url)
             .expect("valid url")
             .connect()
             .await
-            .expect("connect to validator service");
+            .expect("connect to block engine");
         let mut client =
             BlockEngineValidatorClient::with_interceptor(channel, move |mut req: Request<()>| {
                 req.metadata_mut().insert("authorization", bearer.clone());

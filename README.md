@@ -242,12 +242,11 @@ Deployment notes:
 
 - Run the proxy on the validator host so the identity key never leaves the box.
 - Validate on testnet first, then mainnet with the rollback path ready.
-- **Before connecting a real jito-solana validator**: it authenticates and
-  subscribes over a single `--block-engine-url`, so the proxy must serve the
-  `AuthService` and `BlockEngineValidator` on one shared address. This build
-  still exposes them on separate ports (`:1005` / `:1003`), which the bundled
-  test clients use; co-locating them on one endpoint is the remaining step for
-  real-validator hookup.
+- The validator endpoint (`:1003`) serves both `AuthService` and
+  `BlockEngineValidator`, so a real jito-solana validator connects with a single
+  `--block-engine-url` pointed at it (authenticates and subscribes on one
+  address). The standalone auth port (`:1005`) remains for the searcher/relayer
+  tooling.
 
 ## Testing
 

@@ -507,8 +507,10 @@ fn main() {
         );
         let validator_svc =
             BlockEngineValidatorServer::with_interceptor(validator_impl, interceptor);
+        let validator_auth_svc = AuthServiceServer::new(AuthServiceImpl::new(auth_state.clone()));
         info!("starting validator server at {}", args.validator_addr);
         Server::builder()
+            .add_service(validator_auth_svc)
             .add_service(validator_svc)
             .serve_with_shutdown(args.validator_addr, wait_shutdown(shutdown_rx))
             .await
