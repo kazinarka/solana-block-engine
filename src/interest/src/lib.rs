@@ -118,3 +118,28 @@ fn is_writable_static(
         index < num_accounts.saturating_sub(num_ro_unsigned)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::is_writable_static;
+
+    #[test]
+    fn classifies_each_account_region() {
+        assert!(is_writable_static(0, 4, 2, 1, 1));
+        assert!(!is_writable_static(1, 4, 2, 1, 1));
+        assert!(is_writable_static(2, 4, 2, 1, 1));
+        assert!(!is_writable_static(3, 4, 2, 1, 1));
+    }
+
+    #[test]
+    fn all_writable() {
+        assert!(is_writable_static(0, 2, 1, 0, 0));
+        assert!(is_writable_static(1, 2, 1, 0, 0));
+    }
+
+    #[test]
+    fn all_readonly() {
+        assert!(!is_writable_static(0, 2, 1, 1, 1));
+        assert!(!is_writable_static(1, 2, 1, 1, 1));
+    }
+}

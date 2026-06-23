@@ -49,7 +49,7 @@ impl RpcSimulator {
         }
     }
 
-    fn packets<'a>(bundle: &'a BundleUuid) -> &'a [Packet] {
+    fn packets(bundle: &BundleUuid) -> &[Packet] {
         bundle
             .bundle
             .as_ref()
@@ -144,20 +144,72 @@ impl RpcSimulator {
             return SimOutcome { ok: false, units_consumed: 0 };
         }
 
-        let value = &resp["result"]["value"];
-        // `summary` is the string "succeeded" on success, otherwise an object
-        // describing the failing transaction.
-        let ok = value.get("summary") == Some(&serde_json::json!("succeeded"));
-        let total_cu = value
-            .get("transactionResults")
-            .and_then(|r| r.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|t| t.get("unitsConsumed").and_then(|u| u.as_u64()))
-                    .sum()
-            })
-            .unwrap_or(0);
+        parse_simulate_bundle(&resp)
+    }
+}
 
-        SimOutcome { ok, units_consumed: total_cu }
+pub fn parse_simulate_bundle(resp: &serde_json::Value) -> SimOutcome {
+    if resp.get("error").is_some() {
+        return SimOutcome { ok: false, units_consumed: 0 };
+    }
+    let value = &resp["result"]["value"];
+    let ok = value.get("summary") == Some(&serde_json::json!("succeeded"));
+    let units_consumed = value
+        .get("transactionResults")
+        .and_then(|r| r.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|t| t.get("unitsConsumed").and_then(|u| u.as_u64()))
+                .sum()
+        })
+        .unwrap_or(0);
+    SimOutcome { ok, units_consumed }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_simulate_bundle;
+
+    #[test]
+    fn succeeded_sums_units() {
+        let resp = serde_json::json!({
+            "result": { "value": {
+                "summary": "succeeded",
+                "transactionResults": [
+                    { "unitsConsumed": 1000 },
+                    { "unitsConsumed": 2500 }
+                ]
+            }}
+        });
+        let outcome = parse_simulate_bundle(&resp);
+        assert!(outcome.ok);
+        assert_eq!(outcome.units_consumed, 3500);
+    }
+
+    #[test]
+    fn failed_summary_is_not_ok() {
+        let resp = serde_json::json!({
+            "result": { "value": {
+                "summary": { "failed": { "error": "anything" } },
+                "transactionResults": []
+            }}
+        });
+        assert!(!parse_simulate_bundle(&resp).ok);
+    }
+
+    #[test]
+    fn rpc_error_is_not_ok() {
+        let resp = serde_json::json!({ "error": { "code": -32000, "message": "boom" } });
+        let outcome = parse_simulate_bundle(&resp);
+        assert!(!outcome.ok);
+        assert_eq!(outcome.units_consumed, 0);
+    }
+
+    #[test]
+    fn missing_fields_default_to_zero() {
+        let resp = serde_json::json!({ "result": { "value": { "summary": "succeeded" } } });
+        let outcome = parse_simulate_bundle(&resp);
+        assert!(outcome.ok);
+        assert_eq!(outcome.units_consumed, 0);
     }
 }
