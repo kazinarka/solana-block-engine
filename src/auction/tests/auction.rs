@@ -127,6 +127,22 @@ fn empty_auction_returns_no_winners() {
 }
 
 #[test]
+fn zero_tip_bundle_is_included_when_budget_allows() {
+    let tip = Pubkey::new_unique();
+    let other = Pubkey::new_unique();
+    let auction = Auction::new(HashSet::from([tip]), 48_000_000, Duration::from_secs(5));
+    let payer = Keypair::new();
+    auction.submit(bundle("backrun", vec![transfer_packet(&payer, &other, 5_000)]));
+
+    let winners = auction.run_auction();
+    assert_eq!(
+        uuids(&winners),
+        vec!["backrun"],
+        "a bundle that does not tip the configured accounts is still emitted when it fits"
+    );
+}
+
+#[test]
 fn failed_simulation_drops_bundle() {
     let tip = Pubkey::new_unique();
     let auction = Auction::new(HashSet::from([tip]), 48_000_000, Duration::from_secs(5));

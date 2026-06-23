@@ -12,6 +12,7 @@ use tonic::transport::Channel;
 
 const REFRESH_MARGIN: Duration = Duration::from_secs(60);
 const RETRY_DELAY: Duration = Duration::from_secs(5);
+const MIN_REFRESH_WAIT: Duration = Duration::from_secs(1);
 
 pub struct TokenManager {
     token: RwLock<String>,
@@ -80,7 +81,9 @@ async fn refresh_loop(
     mut tokens: GenerateAuthTokensResponse,
 ) {
     loop {
-        let wait = ttl_until(&tokens.access_token).saturating_sub(REFRESH_MARGIN);
+        let wait = ttl_until(&tokens.access_token)
+            .saturating_sub(REFRESH_MARGIN)
+            .max(MIN_REFRESH_WAIT);
         tokio::time::sleep(wait).await;
 
         let refreshed = if ttl_until(&tokens.refresh_token) > REFRESH_MARGIN {

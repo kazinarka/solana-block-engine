@@ -63,3 +63,39 @@ async fn rejects_non_whitelisted_validator() {
     let channel = connect(format!("http://{addr}")).await.unwrap();
     assert!(TokenManager::start(channel, keypair).await.is_err());
 }
+
+#[tokio::test]
+async fn keeps_token_fresh_via_refresh() {
+    let keypair = Arc::new(Keypair::new());
+    let mut allowed = HashSet::new();
+    allowed.insert(keypair.pubkey().to_string());
+    let mut state = AuthState::new(b"test-secret".to_vec(), Some(allowed));
+    state.access_ttl = Duration::from_secs(2);
+    let state = Arc::new(state);
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server_state = state.clone();
+    tokio::spawn(async move {
+        Server::builder()
+            .add_service(AuthServiceServer::new(AuthServiceImpl::new(server_state)))
+            .serve_with_incoming(TcpListenerStream::new(listener))
+            .await
+            .unwrap();
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let channel = connect(format!("http://{addr}")).await.unwrap();
+    let manager = TokenManager::start(channel, keypair).await.unwrap();
+
+    let first_exp = state.validate(&manager.token()).unwrap().exp;
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    let later = state.validate(&manager.token()).unwrap();
+
+    assert!(!later.refresh);
+    assert!(
+        later.exp > first_exp,
+        "refresh should advance the access token expiry ({} <= {first_exp})",
+        later.exp
+    );
+}
